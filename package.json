@@ -1,0 +1,12 @@
+{
+  "name": "trade-forex",
+  "version": "1.0.0",
+  "private": true,
+  "description": "สมุดบันทึกและวิเคราะห์การเทรด Forex ทองคำ และบิตคอยน์",
+  "scripts": {
+    "start": "python3 -m http.server 8080",
+    "test": "TZ=Asia/Bangkok node --test tests/core.test.js",
+    "test:browser": "node tests/browser/local.e2e.js && node tests/browser/cloud.e2e.js",
+    "build:artifact": "node scripts/build-artifact.mjs"
+  }
+}

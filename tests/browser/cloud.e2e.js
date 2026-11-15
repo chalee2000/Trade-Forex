@@ -1,0 +1,219 @@
+'use strict';
+/*
+ * Browser test of the artifact build against an in-memory stand-in for the Claude
+ * `db`, `user` and `downloads` capabilities. The stand-in is deliberately awkward:
+ * every write is followed by a late, out-of-order echo of the state before it.
+ * Needs Playwright:  npm i -D playwright  &&  node tests/browser/cloud.e2e.js
+ */
+const { chromium } = require('playwright');
+const { execFileSync } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const assert = require('assert');
+const { serve } = require('./serve');
+
+const ROOT = path.resolve(__dirname, '../..');
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'trade-forex-'));
+// the artifact host wraps the published page in this skeleton
+const SKELETON = '<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light}body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}</style></head><body>';
+
+const MOCK = () => {
+  const KEY = '__mockdb';
+  let data = JSON.parse(sessionStorage.getItem(KEY) || '{}');
+  const listeners = [];
+  const clone = o => JSON.parse(JSON.stringify(o));
+  const meta = { fromCache: false, hasPendingWrites: false };
+  const docSnap = (p, src) => ({ id: p.split('/').pop(), exists: src[p] !== undefined, data: () => (src[p] === undefined ? undefined : Object.freeze(clone(src[p]))), metadata: meta });
+  const colSnap = (p, src) => {
+    const n = p.split('/').length + 1;
+    const docs = Object.keys(src).filter(k => k.startsWith(p + '/') && k.split('/').length === n).sort().map(k => docSnap(k, src));
+    return { docs, size: docs.length, empty: !docs.length, docChanges: () => [], metadata: meta };
+  };
+  const fire = src => listeners.slice().forEach(l => l.next(l.type === 'doc' ? docSnap(l.path, src) : colSnap(l.path, src)));
+  const M = (window.__mock = { writes: 0, inFlight: 0, maxInFlight: 0, log: [], downloads: [], failNext: 0, data: () => data });
+  function write(p, body) {
+    M.inFlight++; M.maxInFlight = Math.max(M.maxInFlight, M.inFlight);
+    if (M.failNext > 0) { M.failNext--; return new Promise((_, rej) => setTimeout(() => { M.inFlight--; rej({ code: 'unavailable', message: 'mock outage' }); }, 20)); }
+    const before = clone(data);
+    M.writes++; M.log.push(p.split('/').slice(-1)[0] + (body === undefined ? ':del' : ':set'));
+    if (body === undefined) delete data[p]; else data[p] = clone(body);
+    sessionStorage.setItem(KEY, JSON.stringify(data));
+    const after = clone(data);
+    return new Promise(res => {
+      setTimeout(() => fire(after), 10);
+      setTimeout(() => fire(before), 22);   // a late, out-of-order echo of the state before this write
+      setTimeout(() => { M.inFlight--; res(); }, 35);
+    });
+  }
+  function doc(p) {
+    if (p.split('/').length % 2) throw new TypeError('document path needs an even number of segments: ' + p);
+    return {
+      id: p.split('/').pop(), path: p, get: async () => docSnap(p, data), set: b => write(p, b), delete: () => write(p, undefined),
+      update: b => write(p, Object.assign({}, data[p], b)),
+      onSnapshot(next) { const l = { type: 'doc', path: p, next }; listeners.push(l); setTimeout(() => next(docSnap(p, data)), 15); return () => listeners.splice(listeners.indexOf(l), 1); },
+      collection: sub => collection(p + '/' + sub)
+    };
+  }
+  function collection(p) {
+    if (p.split('/').length % 2 === 0) throw new TypeError('collection path needs an odd number of segments: ' + p);
+    return {
+      path: p, doc: id => doc(p + '/' + id), get: async () => colSnap(p, data),
+      onSnapshot(next) { const l = { type: 'col', path: p, next }; listeners.push(l); setTimeout(() => next(colSnap(p, data)), 20); return () => listeners.splice(listeners.indexOf(l), 1); }
+    };
+  }
+  const caps = {
+    db: Object.freeze({ doc, collection }),
+    user: Object.freeze({ id: async () => 'u_test-1', isOwner: async () => true }),
+    downloads: Object.freeze({ save: async r => { M.downloads.push({ filename: r.filename, head: String(r.data).slice(0, 40) }); return { status: 'saved' }; } })
+  };
+  window.claude = { use: name => new Promise(res => setTimeout(() => res(caps[name] || null), 30)) };
+};
+
+(async () => {
+  execFileSync(process.execPath, [path.join(ROOT, 'scripts/build-artifact.mjs'), TMP], { stdio: 'ignore' });
+  fs.renameSync(path.join(TMP, 'trade-forex.html'), path.join(TMP, 'index.html'));
+  const site = await serve(TMP, (html) => SKELETON + html + '</body></html>');
+  const browser = await chromium.launch();
+  const errors = [];
+  const ctx = await browser.newContext({ viewport: { width: 1200, height: 900 }, timezoneId: 'Asia/Bangkok', locale: 'th-TH' });
+  await ctx.addInitScript(MOCK);
+  const p = await ctx.newPage();
+  p.on('console', m => { if (m.type() === 'error' && !/ERR_FAILED/.test(m.text())) errors.push(m.text()); });
+  p.on('pageerror', e => errors.push('PAGEERROR ' + e.message));
+  await p.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
+  const step = n => console.log('ok  ' + n);
+  const mock = () => p.evaluate(() => ({ d: window.__mock.data(), writes: window.__mock.writes, log: window.__mock.log, max: window.__mock.maxInFlight, dl: window.__mock.downloads }));
+  const settle = () => p.waitForFunction(() => window.__mock.inFlight === 0 && !window.TFApp.store.saving, null, { timeout: 15000 }).then(() => p.waitForTimeout(80));
+  const BASE = 'data/users/u_test-1/journal';
+
+  await p.goto(site.url);
+  assert.match(await p.locator('.loading-title').first().innerText(), /กำลังเปิดสมุดเทรด/);
+  await p.waitForSelector('.summary');
+  assert.equal(await p.evaluate(() => window.TFApp.store.mode), 'cloud');
+  assert.equal(await p.evaluate(() => localStorage.getItem('tf.trades.v1')), null);
+  step('artifact build boots in cloud mode, shows examples while the journal is empty');
+
+  async function add(symbol, lots, entry, exit, sl) {
+    await p.click('#btn-add');
+    await p.fill('#f-symbol', symbol);
+    await p.fill('#f-lots', String(lots));
+    await p.fill('#f-entry', String(entry));
+    await p.fill('#f-exit', String(exit));
+    await p.fill('#f-sl', String(sl));
+    await p.fill('#f-open', '2026-11-03T09:15');
+    await p.fill('#f-close', '2026-11-03T11:40');
+    await p.click('#btn-save-trade');
+  }
+  // two trades back to back: the second is saved while the first write is still in flight
+  await add('XAUUSD', 0.1, 4100, 4112.5, 4090);
+  await add('EURUSD', 0.5, 1.165, 1.164, 1.167);
+  await settle();
+  let m = await mock();
+  assert.deepEqual(Object.keys(m.d), [BASE + '/chunks/c00001']);
+  assert.equal(m.d[BASE + '/chunks/c00001'].trades.length, 2);
+  assert.equal(m.max, 1, 'never more than one write in flight');
+  assert.equal(await p.evaluate(() => window.TFApp.store.trades.length), 2);
+  assert.match(await p.locator('.hero-value').innerText(), /\+\$75\.00/);
+  const stored = m.d[BASE + '/chunks/c00001'].trades[0];
+  assert.ok(!('notes' in stored) && !('sample' in stored) && stored.symbol === 'XAUUSD', JSON.stringify(stored));
+  step('rapid saves land in one private document; stale echoes do not drop trades');
+
+  await p.click('.tabs a[data-view="tools"]');
+  assert.match(await p.locator('#storage-note').innerText(), /บัญชี Claude/);
+  await p.fill('#s-balance', '2000');
+  await p.click('#form-settings button[type=submit]');
+  await settle();
+  m = await mock();
+  assert.equal(m.d[BASE].settings.startBalance, 2000);
+  step('settings saved to the journal document');
+
+  await p.reload();
+  await p.waitForFunction(() => window.TFApp.state.ready);
+  assert.equal(await p.evaluate(() => window.TFApp.state.view), 'tools', 'the open tab survives a reload through the hash');
+  await p.click('.tabs a[data-view="overview"]');
+  await p.waitForSelector('.summary');
+  assert.equal(await p.evaluate(() => window.TFApp.store.trades.length), 2);
+  assert.match(await p.locator('.hero-meta').innerText(), /จากทุน \$2,000/);
+  step('reload restores trades and settings from the store');
+
+  // a write that fails twice is retried and lands
+  await p.evaluate(() => { window.__mock.failNext = 2; });
+  await add('BTCUSD', 0.05, 104000, 105000, 103000);
+  await p.waitForFunction(() => /เชื่อมต่อที่เก็บข้อมูลไม่ได้ชั่วคราว/.test(document.querySelector('#toast').textContent));
+  await p.waitForFunction(() => { const d = window.__mock.data()['data/users/u_test-1/journal/chunks/c00001']; return d && d.trades.length === 3; }, null, { timeout: 15000 });
+  await settle();
+  step('failed write is reported, retried and saved');
+
+  // bulk import: 230 trades -> spread over chunks of 100
+  const rows = ['openTime,closeTime,symbol,side,lots,entry,exit,pnl'];
+  for (let i = 0; i < 230; i++) {
+    const d = new Date(2026, 0, 5 + Math.floor(i / 2), 9 + (i % 2) * 5, 0);
+    const s = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + 'T' + String(d.getHours()).padStart(2, '0') + ':00';
+    rows.push([s, s.slice(0, 11) + String(d.getHours() + 2).padStart(2, '0') + ':00', 'GBPUSD', i % 3 ? 'buy' : 'sell', '0.10', '1.3300', '1.3310', i % 3 ? '10' : '-10'].join(','));
+  }
+  fs.writeFileSync(path.join(TMP, 'bulk.csv'), rows.join('\n'));
+  const before = (await mock()).writes;
+  await p.setInputFiles('#file-import', path.join(TMP, 'bulk.csv'));
+  await p.click('#dlg-confirm-yes');
+  await settle();
+  m = await mock();
+  const sizes = Object.keys(m.d).filter(k => k.includes('/chunks/')).sort().map(k => m.d[k].trades.length);
+  assert.deepEqual(sizes, [100, 100, 33]);
+  assert.equal(m.writes - before, 3, 'one write per touched chunk');
+  assert.equal(await p.evaluate(() => window.TFApp.store.trades.length), 233);
+  const bytes = Math.max(...Object.keys(m.d).map(k => JSON.stringify(m.d[k]).length));
+  assert.ok(bytes < 100 * 1024, 'chunk size ' + bytes);
+  step('bulk import of 230 trades = 3 writes, chunks of 100 (largest ' + (bytes / 1024).toFixed(1) + ' KB)');
+
+  // edit + delete inside chunks
+  await p.click('.tabs a[data-view="journal"]');
+  await p.fill('#q', 'btc');
+  await p.click('.journal-table tbody tr');
+  await p.click('#btn-delete-trade');
+  await p.click('#dlg-confirm-yes');
+  await settle();
+  m = await mock();
+  assert.equal(m.d[BASE + '/chunks/c00001'].trades.length, 99);
+  await p.fill('#q', '');
+  step('delete rewrites only the chunk that held the trade');
+
+  // export goes through the downloads capability
+  await p.click('#view-journal [data-action="export-csv"]');
+  await p.waitForFunction(() => window.__mock.downloads.length === 1);
+  m = await mock();
+  assert.match(m.dl[0].filename, /^trade-forex-.*\.csv$/);
+  step('export uses the downloads capability');
+
+  // a change made on another device shows up here
+  await p.evaluate(() => {
+    const k = 'data/users/u_test-1/journal/chunks/c00003';
+    const d = window.__mock.data();
+    const body = JSON.parse(JSON.stringify(d[k]));
+    body.rev += 1000;
+    body.trades.push({ id: 'remote1', symbol: 'XAUUSD', asset: 'gold', side: 'buy', lots: 0.01, entry: 4000, exit: 4010, openTime: '2026-11-10T10:00', closeTime: '2026-11-10T11:00', pnl: 10 });
+    return window.claude.use('db').then(db => db.doc(k).set(body));
+  });
+  await p.waitForFunction(() => window.TFApp.store.trades.some(t => t.id === 'remote1'));
+  step('remote change appears without a reload');
+
+  // clear all removes every chunk document
+  await p.click('.tabs a[data-view="tools"]');
+  await p.click('[data-action="clear-all"]');
+  await p.click('#dlg-confirm-yes');
+  await settle();
+  m = await mock();
+  assert.deepEqual(Object.keys(m.d), [BASE]);
+  assert.equal(m.d[BASE].settings.hideDemo, true);
+  await p.reload();
+  await p.waitForFunction(() => window.TFApp.state.ready);
+  await p.click('.tabs a[data-view="overview"]');
+  await p.waitForSelector('.empty');
+  step('clear all deletes every chunk; empty state after reload');
+
+  console.log('console errors:', JSON.stringify(errors));
+  assert.equal(errors.length, 0);
+  await browser.close();
+  site.close();
+  console.log('CLOUD BROWSER TEST PASSED');
+})().catch(e => { console.error('CLOUD BROWSER TEST FAILED\n', e); process.exit(1); });

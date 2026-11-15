@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- page:head -->
+<title>Trade-Forex สมุดเทรด</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap">
+<!-- /page:head -->
+<meta name="description" content="สมุดบันทึกและวิเคราะห์การเทรด Forex ทองคำ และบิตคอยน์ พร้อมกราฟและสถิติ">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2314263f'/%3E%3Cpath d='M10 6v20M22 6v20' stroke='%23fff' stroke-width='1.6'/%3E%3Crect x='7' y='11' width='6' height='9' rx='1' fill='%231baf7a'/%3E%3Crect x='19' y='9' width='6' height='11' rx='1' fill='%23e34948'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<!-- page:body -->
+<header class="topbar">
+  <div class="wrap topbar-in">
+    <a class="brand" href="#overview" aria-label="Trade-Forex หน้าภาพรวม">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" class="bm-bg"/><path d="M10 6v20M22 6v20" class="bm-wick"/><rect x="7" y="11" width="6" height="9" rx="1" class="bm-up"/><rect x="19" y="9" width="6" height="11" rx="1" class="bm-down"/></svg>
+      <span class="brand-name">Trade-Forex</span>
+      <span class="brand-sub">สมุดเทรด</span>
+    </a>
+    <nav class="tabs" aria-label="หน้าหลัก">
+      <a href="#overview" data-view="overview">ภาพรวม</a>
+      <a href="#journal" data-view="journal">บันทึกเทรด</a>
+      <a href="#analysis" data-view="analysis">วิเคราะห์</a>
+      <a href="#tools" data-view="tools">เครื่องมือ</a>
+    </nav>
+    <button type="button" class="btn btn-primary" id="btn-add" data-action="add-trade">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg><span>บันทึกเทรด</span>
+    </button>
+  </div>
+</header>
+
+<main class="wrap main" id="main">
+  <div id="banner" class="banner-slot"></div>
+
+  <section id="filters" class="filters" aria-label="ตัวกรอง">
+    <div class="filter-group">
+      <span class="filter-label" id="lbl-range">ช่วงเวลา</span>
+      <div class="seg" role="group" aria-labelledby="lbl-range" id="seg-range"></div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label" id="lbl-asset">สินทรัพย์</span>
+      <div class="seg" role="group" aria-labelledby="lbl-asset" id="seg-asset"></div>
+    </div>
+  </section>
+
+  <section id="view-overview" class="view" aria-label="ภาพรวม">
+    <div id="overview-body" class="stack">
+      <div class="card loading-card"><p class="loading-title">กำลังเปิดสมุดเทรด…</p><p class="muted">กำไร/ขาดทุนรวม เส้นเงินทุน และสถิติของคุณจะแสดงที่นี่</p></div>
+    </div>
+  </section>
+
+  <section id="view-journal" class="view" aria-label="บันทึกเทรด" hidden>
+    <div class="toolbar">
+      <label class="search">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+        <span class="sr-only">ค้นหาเทรด</span>
+        <input type="search" id="q" placeholder="ค้นหา คู่เงิน กลยุทธ์ หรือโน้ต" autocomplete="off">
+      </label>
+      <div class="toolbar-actions">
+        <button type="button" class="btn" data-action="import">นำเข้าไฟล์</button>
+        <button type="button" class="btn" data-action="export-csv">ส่งออก CSV</button>
+      </div>
+    </div>
+    <div id="journal-body" class="stack"></div>
+  </section>
+
+  <section id="view-analysis" class="view" aria-label="วิเคราะห์" hidden>
+    <div id="analysis-body" class="stack"></div>
+  </section>
+
+  <section id="view-tools" class="view" aria-label="เครื่องมือ" hidden>
+    <div class="stack">
+      <div class="card">
+        <div class="card-head"><div><h2 class="h3">คำนวณขนาด Lot</h2><p class="sub">ใส่เงินในพอร์ต ความเสี่ยงที่รับได้ และจุด SL แล้วดูว่าควรเปิดกี่ Lot</p></div></div>
+        <div class="calc">
+          <form id="form-calc" class="form-grid" novalidate>
+            <div class="field span-3"><label for="c-balance">เงินในพอร์ต ($)</label><input id="c-balance" name="balance" type="number" inputmode="decimal" min="0" step="any"></div>
+            <div class="field span-3"><label for="c-risk">เสี่ยงต่อเทรด (%)</label><input id="c-risk" name="riskPct" type="number" inputmode="decimal" min="0" step="any"></div>
+            <div class="field span-6"><label for="c-symbol">สินทรัพย์</label><select id="c-symbol" name="symbol"></select></div>
+            <div class="field span-2"><label for="c-entry">ราคาเข้า</label><input id="c-entry" name="entry" type="number" inputmode="decimal" min="0" step="any"></div>
+            <div class="field span-2"><label for="c-sl">Stop loss</label><input id="c-sl" name="sl" type="number" inputmode="decimal" min="0" step="any"></div>
+            <div class="field span-2"><label for="c-tp">Take profit <span class="opt">ไม่บังคับ</span></label><input id="c-tp" name="tp" type="number" inputmode="decimal" min="0" step="any"></div>
+          </form>
+          <div id="calc-result" class="calc-result" aria-live="polite"></div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <div class="card-head"><div><h2 class="h3">ทุนเริ่มต้น</h2><p class="sub">ใช้คิดผลตอบแทนเป็น % เส้นเงินทุน และ Drawdown</p></div></div>
+          <form id="form-settings" class="inline-form" novalidate>
+            <div class="field"><label for="s-balance">ทุนเริ่มต้นของพอร์ต ($)</label><input id="s-balance" name="startBalance" type="number" inputmode="decimal" min="0" step="any" placeholder="เช่น 5000"></div>
+            <button type="submit" class="btn btn-primary">บันทึก</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><div><h2 class="h3">ข้อมูลของคุณ</h2><p class="sub" id="storage-note"></p></div></div>
+          <div class="btn-row">
+            <button type="button" class="btn" data-action="backup">สำรองข้อมูล (.json)</button>
+            <button type="button" class="btn" data-action="import">กู้คืน / นำเข้าไฟล์</button>
+            <button type="button" class="btn" data-action="export-csv">ส่งออก CSV</button>
+            <button type="button" class="btn btn-danger-ghost" data-action="clear-all">ลบเทรดทั้งหมด</button>
+          </div>
+          <p class="fine">นำเข้าได้ทั้งไฟล์สำรอง .json จากแอพนี้ และไฟล์ .csv ที่มีคอลัมน์ symbol, side, lots, entry, exit, openTime, closeTime, pnl</p>
+        </div>
+      </div>
+
+      <p class="fine disclaimer">แอพนี้ใช้บันทึกและสรุปสถิติการเทรดของคุณเอง ไม่ใช่คำแนะนำการลงทุน กำไร/ขาดทุนที่คำนวณอัตโนมัติคิดเป็นดอลลาร์สหรัฐ (Forex 1 Lot = 100,000 หน่วย ทองคำ 1 Lot = 100 ออนซ์ บิตคอยน์ 1 Lot = 1 BTC) ถ้าโบรกเกอร์ของคุณใช้ขนาดสัญญาต่างจากนี้ ให้ใส่ตัวเลขตามที่โบรกเกอร์แสดง</p>
+    </div>
+  </section>
+</main>
+
+<input type="file" id="file-import" accept=".csv,.json,text/csv,application/json" hidden>
+
+<dialog id="dlg-trade" class="dialog" aria-labelledby="dlg-trade-title">
+  <form id="form-trade" novalidate>
+    <header class="dialog-head">
+      <h2 id="dlg-trade-title">บันทึกเทรด</h2>
+      <button type="button" class="icon-btn" data-action="close-dialog" aria-label="ปิด"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+    </header>
+    <div class="dialog-body">
+      <div class="form-grid">
+        <div class="field span-6">
+          <span class="label" id="lbl-f-asset">สินทรัพย์</span>
+          <div class="seg seg-radio" role="radiogroup" aria-labelledby="lbl-f-asset">
+            <label><input type="radio" name="asset" value="forex" id="f-asset-forex"><span>Forex</span></label>
+            <label><input type="radio" name="asset" value="gold" id="f-asset-gold"><span>ทองคำ</span></label>
+            <label><input type="radio" name="asset" value="crypto" id="f-asset-crypto"><span>บิตคอยน์</span></label>
+          </div>
+        </div>
+        <div class="field span-3">
+          <label for="f-symbol">คู่เงิน / สัญลักษณ์</label>
+          <input id="f-symbol" name="symbol" list="dl-symbols" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="EURUSD">
+          <datalist id="dl-symbols"></datalist>
+          <p class="err" data-err="symbol"></p>
+        </div>
+        <div class="field span-3">
+          <span class="label" id="lbl-f-side">ฝั่ง</span>
+          <div class="seg seg-radio" role="radiogroup" aria-labelledby="lbl-f-side">
+            <label><input type="radio" name="side" value="buy" id="f-side-buy"><span>Buy <small>(Long)</small></span></label>
+            <label><input type="radio" name="side" value="sell" id="f-side-sell"><span>Sell <small>(Short)</small></span></label>
+          </div>
+        </div>
+        <div class="field span-2"><label for="f-lots">ขนาด Lot</label><input id="f-lots" name="lots" type="number" inputmode="decimal" min="0" step="any" placeholder="0.10"><p class="err" data-err="lots"></p></div>
+        <div class="field span-2"><label for="f-entry">ราคาเข้า</label><input id="f-entry" name="entry" type="number" inputmode="decimal" min="0" step="any"><p class="err" data-err="entry"></p></div>
+        <div class="field span-2"><label for="f-exit">ราคาออก</label><input id="f-exit" name="exit" type="number" inputmode="decimal" min="0" step="any" placeholder="ว่างไว้ถ้ายังไม่ปิด"><p class="err" data-err="exit"></p></div>
+        <div class="field span-2"><label for="f-sl">Stop loss <span class="opt">ไม่บังคับ</span></label><input id="f-sl" name="sl" type="number" inputmode="decimal" min="0" step="any"><p class="err" data-err="sl"></p></div>
+        <div class="field span-2"><label for="f-tp">Take profit <span class="opt">ไม่บังคับ</span></label><input id="f-tp" name="tp" type="number" inputmode="decimal" min="0" step="any"><p class="err" data-err="tp"></p></div>
+        <div class="field span-2"><label for="f-fees">ค่าคอม + สวอป ($)</label><input id="f-fees" name="fees" type="number" inputmode="decimal" step="any" placeholder="0"></div>
+        <div class="field span-3 full-sm"><label for="f-open">เปิดออเดอร์เมื่อ</label><input id="f-open" name="openTime" type="datetime-local"><p class="err" data-err="openTime"></p></div>
+        <div class="field span-3 full-sm"><label for="f-close">ปิดออเดอร์เมื่อ</label><input id="f-close" name="closeTime" type="datetime-local"><p class="err" data-err="closeTime"></p></div>
+        <div class="field span-3">
+          <label for="f-pnl">กำไร/ขาดทุนสุทธิ ($)</label>
+          <input id="f-pnl" name="pnl" type="number" inputmode="decimal" step="any" placeholder="ติดลบถ้าขาดทุน">
+          <p class="hint" id="f-pnl-hint"></p>
+          <p class="err" data-err="pnl"></p>
+        </div>
+        <div class="field span-3">
+          <span class="label">สรุปจากราคา</span>
+          <dl class="calc-mini" id="f-derived"></dl>
+        </div>
+        <div class="field span-3"><label for="f-strategy">กลยุทธ์ / Setup <span class="opt">ไม่บังคับ</span></label><input id="f-strategy" name="strategy" list="dl-strategies" autocomplete="off" maxlength="60" placeholder="เช่น Breakout"><datalist id="dl-strategies"></datalist></div>
+        <div class="field span-3"><label for="f-emotion">อารมณ์ตอนเข้า <span class="opt">ไม่บังคับ</span></label><select id="f-emotion" name="emotion"></select></div>
+        <div class="field span-6">
+          <span class="label" id="lbl-f-plan">ทำตามแผนหรือไม่ <span class="opt">ไม่บังคับ</span></span>
+          <div class="seg seg-radio" role="radiogroup" aria-labelledby="lbl-f-plan">
+            <label><input type="radio" name="plan" value="" id="f-plan-none"><span>ไม่ระบุ</span></label>
+            <label><input type="radio" name="plan" value="yes" id="f-plan-yes"><span>ทำตามแผน</span></label>
+            <label><input type="radio" name="plan" value="no" id="f-plan-no"><span>หลุดแผน</span></label>
+          </div>
+        </div>
+        <div class="field span-6"><label for="f-notes">โน้ต <span class="opt">ไม่บังคับ</span></label><textarea id="f-notes" name="notes" rows="3" maxlength="1000" placeholder="เหตุผลที่เข้า สิ่งที่ทำได้ดี สิ่งที่จะแก้ครั้งหน้า"></textarea></div>
+      </div>
+    </div>
+    <footer class="dialog-foot">
+      <button type="button" class="btn btn-danger-ghost" id="btn-delete-trade" data-action="delete-trade" hidden>ลบเทรดนี้</button>
+      <span class="spacer"></span>
+      <button type="button" class="btn" data-action="close-dialog">ยกเลิก</button>
+      <button type="submit" class="btn btn-primary" id="btn-save-trade">บันทึก</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog id="dlg-confirm" class="dialog dialog-sm" aria-labelledby="dlg-confirm-title">
+  <div class="dialog-body">
+    <h2 id="dlg-confirm-title" class="h3"></h2>
+    <p id="dlg-confirm-text" class="muted"></p>
+  </div>
+  <footer class="dialog-foot">
+    <span class="spacer"></span>
+    <button type="button" class="btn" data-action="confirm-no">ยกเลิก</button>
+    <button type="button" class="btn btn-danger" id="dlg-confirm-yes" data-action="confirm-yes">ยืนยัน</button>
+  </footer>
+</dialog>
+
+<dialog id="dlg-text" class="dialog" aria-labelledby="dlg-text-title">
+  <header class="dialog-head">
+    <h2 id="dlg-text-title"></h2>
+    <button type="button" class="icon-btn" data-action="close-dialog" aria-label="ปิด"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+  </header>
+  <div class="dialog-body">
+    <p class="muted" id="dlg-text-help"></p>
+    <textarea id="dlg-text-area" rows="10" readonly spellcheck="false"></textarea>
+  </div>
+  <footer class="dialog-foot">
+    <span class="spacer"></span>
+    <button type="button" class="btn" data-action="close-dialog">ปิด</button>
+    <button type="button" class="btn btn-primary" data-action="copy-text">คัดลอกทั้งหมด</button>
+  </footer>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="vendor/chart.umd.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/sample.js"></script>
+<script src="js/store.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/app.js"></script>
+<!-- /page:body -->
+</body>
+</html>
