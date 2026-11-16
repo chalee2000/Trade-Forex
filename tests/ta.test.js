@@ -222,3 +222,72 @@ test('example candles are deterministic, well-formed and analysable for every sy
     }
   }
 });
+
+/** Every setup must be internally consistent, whatever the market looks like. */
+function checkSetup(s, a) {
+  const d = s.side === 'buy' ? 1 : -1;
+  assert.ok(d * (s.entry - s.sl) > 0, `${s.side}: stop on the wrong side of entry (${s.entry} / ${s.sl})`);
+  const risk = d * (s.entry - s.sl);
+  assert.ok(risk >= 0.79 * a.atr && risk <= 3.01 * a.atr, `${s.side}: risk ${risk} outside 0.8–3 ATR (${a.atr})`);
+  assert.equal(s.tps.length, 3);
+  let prev = s.entry;
+  for (const t of s.tps) {
+    assert.ok(d * (t.price - prev) > 0, `${s.side}: targets must step away from entry`);
+    prev = t.price;
+  }
+  assert.ok(s.tps[0].rr >= 0.99, `${s.side}: TP1 below 1R (${s.tps[0].rr})`);
+  assert.ok(s.tps[1].rr - s.tps[0].rr >= 0.5 && s.tps[2].rr - s.tps[1].rr >= 0.5, `${s.side}: targets too close together`);
+  assert.ok(s.zone[0] <= s.zone[1]);
+  assert.ok(s.entry >= s.zone[0] - a.atr * 0.2 && s.entry <= s.zone[1] + a.atr * 0.2, `${s.side}: entry outside its zone`);
+  if (s.entryType === 'market') assert.equal(s.entry, C.round(a.close, a.digits));
+  assert.ok(s.entryBasis && s.slBasis && s.note && s.tps.every(t => t.basis));
+}
+const C = require('../js/core.js');
+
+test('setups: both sides are consistent on every example market', () => {
+  const now = new Date('2026-11-16T10:00:00Z');
+  for (const sym of ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'USDCHF', 'USDCAD', 'XAUUSD', 'BTCUSD']) {
+    for (const tf of [15, 60, 240, 1440]) {
+      const a = T.analyze(S.sampleCandles(sym, tf, 320, now), { symbol: sym });
+      checkSetup(a.setups.buy, a);
+      checkSetup(a.setups.sell, a);
+    }
+  }
+});
+
+test('setups: in an uptrend the buy side follows the trend and the plan uses it', () => {
+  const closes = Array.from({ length: 260 }, (_, i) => 1.1 + i * 0.0004 + Math.sin(i / 4) * 0.0012);
+  const a = T.analyze(bars(closes, 0.0012), { symbol: 'EURUSD', asset: 'forex' });
+  assert.equal(a.preferred, 'buy');
+  assert.equal(a.setups.buy.kind, 'trend');
+  assert.equal(a.setups.buy.favored, true);
+  assert.equal(a.setups.sell.kind, 'counter');
+  assert.equal(a.setups.sell.favored, false);
+  assert.equal(a.plan.entry, a.setups.buy.entry);
+  assert.equal(a.plan.sl, a.setups.buy.sl);
+  assert.equal(a.plan.tp, a.setups.buy.tps[1].price);
+});
+
+test('setups: in a flat market both sides are range trades waiting at the edges', () => {
+  const closes = Array.from({ length: 260 }, (_, i) => 4100 + Math.sin(i / 2.5) * 3);
+  const a = T.analyze(bars(closes, 2), { symbol: 'XAUUSD', asset: 'gold' });
+  assert.equal(a.preferred, null);
+  assert.equal(a.setups.buy.kind, 'range');
+  assert.equal(a.setups.sell.kind, 'range');
+  assert.equal(a.setups.buy.entryType, 'limit');
+  assert.equal(a.setups.sell.entryType, 'limit');
+  assert.ok(a.setups.buy.entry < a.close && a.setups.sell.entry > a.close, 'buy below price, sell above');
+  checkSetup(a.setups.buy, a);
+  checkSetup(a.setups.sell, a);
+});
+
+test('setups: a stretched trend waits for a pullback instead of chasing', () => {
+  // steady climb, then a sharp run-up that leaves price far above EMA20
+  const closes = Array.from({ length: 250 }, (_, i) => 1.1 + i * 0.0003 + Math.sin(i / 4) * 0.0008);
+  for (let k = 1; k <= 12; k++) closes.push(closes[closes.length - 1] + 0.0015);
+  const a = T.analyze(bars(closes, 0.001), { symbol: 'EURUSD', asset: 'forex' });
+  assert.equal(a.preferred, 'buy');
+  assert.equal(a.setups.buy.entryType, 'limit');
+  assert.ok(a.setups.buy.entry < a.close);
+  checkSetup(a.setups.buy, a);
+});

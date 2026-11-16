@@ -82,6 +82,27 @@ const { serve } = require('./serve');
   await p.click('#dlg-trade [data-action="close-dialog"]');
   step('plan prefills the lot calculator and the trade form');
 
+  // the entry/exit ladder: buy is the trend side here, sell flips the ladder
+  const ladder = () => p.$$eval('.ladder .lad', els => els.map(e => e.className.replace('lad ', '')));
+  assert.match(await txt('button[data-setup-side="buy"]'), /★/);
+  let order = (await ladder()).filter(r => r !== 'now');
+  assert.deepEqual(order, ['tp', 'tp', 'tp', 'entry', 'sl'], 'buy: targets above the entry, stop below');
+  await p.click('button[data-setup-side="sell"]');
+  await p.waitForSelector('button[data-setup-side="sell"][aria-pressed="true"]');
+  order = (await ladder()).filter(r => r !== 'now');
+  assert.deepEqual(order, ['sl', 'entry', 'tp', 'tp', 'tp'], 'sell: stop above the entry, targets below');
+  assert.match(await txt('.setup-card .kind-tag'), /สวนแนวโน้ม/);
+  const sell = await p.evaluate(() => window.TFApp.market.analysis.setups.sell);
+  await p.click('[data-action="plan-trade"]');
+  await p.waitForSelector('#dlg-trade[open]');
+  assert.ok(await p.isChecked('#f-side-sell'));
+  assert.equal(Number(await p.inputValue('#f-sl')), sell.sl);
+  assert.equal(Number(await p.inputValue('#f-tp')), sell.tps[1].price);
+  await p.click('#dlg-trade [data-action="close-dialog"]');
+  await p.click('#seg-tf button[data-tf="1h"]');
+  await p.waitForSelector('button[data-setup-side="buy"][aria-pressed="true"]');
+  step('entry/exit ladder switches between buy and sell and feeds the chosen side on');
+
   // a provider failure falls back to clearly-labelled example candles
   await p.selectOption('#m-symbol', 'USDCAD');
   await p.waitForSelector('#market-body .banner .tag');

@@ -347,23 +347,102 @@
     if (out.supports.length && out.supports[0].atrs < 0.6) add('neutral', 'ราคาอยู่ใกล้แนวรับ ' + px(out.supports[0].price), 'ห่างเพียง ' + C.fmtPips(out.supports[0].pips).replace('+', '') + ' pips รอดูว่าจะยืนได้หรือหลุด');
     out.signals = sig;
 
-    /* --- a mechanical plan from ATR and the nearest levels, only when there is a bias --- */
+    /* --- entry, stop and take-profit levels for both sides ---
+     * A mechanical reading of ATR and the levels above; it says where a trade would make sense
+     * on this chart, not whether to take one. Each side gets:
+     *   entry   market (at the last close) or limit (wait for price to come back to a level)
+     *   sl      just beyond the level that protects the entry, else 1.5 ATR away; 0.8–3 ATR
+     *   tps     three targets, each at least 1R and 0.75R apart, placed just in front of a
+     *           level when one is in reach, else at 1.5R / 2.5R / 3.5R
+     */
+    function rnd(v) { return C.round(v, ins.digits); }
+    var allLevels = lv.map(function (l) { return l.price; });
+
+    function setupFor(side) {
+      var d = side === 'buy' ? 1 : -1;
+      var trendSide = out.bias.side;
+      var kind = !trendSide ? 'range' : trendSide === side ? 'trend' : 'counter';
+      var guards = side === 'buy' ? out.supports : out.resistances; // levels on the stop side of price, nearest first
+      var stretch = isNum(e20[i]) ? (d * (close - e20[i])) / A : 0; // how far price has run ahead of EMA20 in this direction
+      var hot = isNum(out.rsi) && (side === 'buy' ? out.rsi >= 70 : out.rsi <= 30);
+      var near = guards.filter(function (l) { return l.atrs >= 0.3 && l.atrs <= 3; })[0];
+
+      var entryType, entry, anchor = null, entryBasis;
+      var waitWord = side === 'buy' ? 'ย่อลงมา' : 'เด้งขึ้นไป';
+      // pullback candidates, nearest to price first: a level, EMA20 (trend side), the outer Bollinger band (other sides)
+      var pulls = [];
+      if (near) pulls.push({ price: near.price, name: (side === 'buy' ? 'แนวรับ ' : 'แนวต้าน ') + px(near.price) });
+      if (kind === 'trend' && isNum(e20[i]) && stretch > 0.3) pulls.push({ price: e20[i], name: 'EMA20 ' + px(e20[i]) });
+      var band = side === 'buy' ? out.bbLower : out.bbUpper;
+      if (kind !== 'trend' && isNum(band) && d * (close - band) > 0.3 * A) pulls.push({ price: band, name: 'ขอบ Bollinger ' + (side === 'buy' ? 'ล่าง ' : 'บน ') + px(band) });
+      pulls.sort(function (x, y) { return Math.abs(close - x.price) - Math.abs(close - y.price); });
+      if (kind === 'trend' && stretch < 1 && !hot) {
+        entryType = 'market'; entry = close;
+        entryBasis = 'เข้าที่ราคาปัจจุบันได้ แนวโน้มหนุนและราคายังไม่วิ่งไกลจาก EMA20';
+      } else if (pulls.length) {
+        var pb = pulls[0];
+        entryType = 'limit'; anchor = pb.price; entry = pb.price + d * 0.15 * A;
+        entryBasis = (kind === 'trend' ? 'ราคาวิ่งไกลจากค่าเฉลี่ยแล้ว ' : '') + 'รอราคา' + waitWord + 'ที่' + pb.name + ' แล้วมีแท่งเทียนปิดยืนยันก่อนเข้า';
+      } else {
+        entryType = 'market'; entry = close;
+        entryBasis = 'ยังไม่มีจุดรอที่ชัด เข้าที่ราคาปัจจุบันเฉพาะเมื่อมีสัญญาณกลับตัวชัด';
+      }
+
+      // the level that protects the entry: the limit anchor, or the nearest level 0.2–2.5 ATR behind the entry
+      var protect = anchor;
+      if (protect === null) {
+        var behind = allLevels.filter(function (p) { var g = d * (entry - p); return g >= 0.2 * A && g <= 2.5 * A; });
+        if (behind.length) protect = side === 'buy' ? Math.max.apply(null, behind) : Math.min.apply(null, behind);
+      }
+      var sl = protect !== null ? protect - d * 0.4 * A : entry - d * 1.5 * A;
+      var slBasis = protect !== null ? 'เลยแนว' + (side === 'buy' ? 'รับ ' : 'ต้าน ') + px(protect) + ' ไป 0.4 ATR' : '1.5 เท่าของ ATR จากจุดเข้า';
+      var risk = d * (entry - sl);
+      if (risk < 0.8 * A) { sl = entry - d * 0.8 * A; slBasis = '0.8 เท่าของ ATR จากจุดเข้า (ระยะขั้นต่ำ)'; }
+      else if (risk > 3 * A) { sl = entry - d * 1.5 * A; slBasis = '1.5 เท่าของ ATR จากจุดเข้า'; }
+      entry = rnd(entry);
+      var f = Math.pow(10, ins.digits); // round the stop away from the entry so rounding never shrinks the risk
+      sl = d > 0 ? Math.floor(sl * f + 1e-9) / f : Math.ceil(sl * f - 1e-9) / f;
+      risk = d * (entry - sl);
+
+      var tps = [], minNext = 1, levelNames = side === 'buy' ? 'แนวต้าน ' : 'แนวรับ ';
+      allLevels.filter(function (p) { return d * (p - entry) > 0; })
+        .sort(function (x, y) { return d * (x - y); })
+        .forEach(function (p) {
+          if (tps.length >= 3) return;
+          var target = p - d * 0.1 * A, rr = (d * (target - entry)) / risk; // take profit just in front of the level
+          if (rr < minNext) return;
+          tps.push({ price: rnd(target), rr: rr, basis: 'ก่อนถึง' + levelNames + px(p) });
+          minNext = rr + 0.75;
+        });
+      [1.5, 2.5, 3.5].forEach(function (m, k) {
+        if (tps.length > k) return;
+        var r = Math.max(m, minNext);
+        tps.push({ price: rnd(entry + d * r * risk), rr: r, basis: r.toFixed(1) + ' เท่าของความเสี่ยง' });
+        minNext = r + 0.75;
+      });
+      tps.forEach(function (t) { t.pips = Math.abs(t.price - entry) / ins.pip; t.rr = Math.abs(t.price - entry) / risk; });
+
+      var zone = entryType === 'limit' ? [anchor, anchor + d * 0.3 * A] : [close - d * 0.2 * A, close];
+      return {
+        side: side, kind: kind, favored: kind === 'trend', entryType: entryType,
+        entry: entry, zone: [rnd(Math.min(zone[0], zone[1])), rnd(Math.max(zone[0], zone[1]))], entryBasis: entryBasis,
+        sl: sl, slBasis: slBasis, slPips: risk / ins.pip, risk: risk,
+        tps: tps,
+        note: kind === 'trend' ? 'เข้าตามแนวโน้มหลัก ทยอยปิดกำไรที่ TP1 แล้วเลื่อน SL มาไว้ที่จุดเข้า ให้ส่วนที่เหลือวิ่งไป TP2 และ TP3' :
+          kind === 'counter' ? 'สวนแนวโน้มหลัก โอกาสสำเร็จต่ำกว่า ถ้าจะเข้าให้ลดขนาด Lot รอสัญญาณกลับตัวก่อน และปิดกำไรเร็วที่ TP1' :
+            'ตลาดยังไม่เลือกทาง เล่นในกรอบ: เข้าเมื่อราคามาถึงขอบกรอบและมีแท่งยืนยัน แล้วปิดกำไรเร็วที่ TP1'
+      };
+    }
+
+    out.setups = { buy: setupFor('buy'), sell: setupFor('sell') };
+    out.preferred = out.bias.side;
+    // the favoured side, in the shape the lot calculator and trade form take (TP2 as the main target)
     out.plan = null;
-    if (out.bias.side) {
-      var d = out.bias.side === 'buy' ? 1 : -1;
-      var slDist = 1.5 * A;
-      var guard = out.bias.side === 'buy' ? out.supports[0] : out.resistances[0];
-      if (guard && guard.atrs >= 0.8 && guard.atrs <= 2.5) slDist = guard.dist + 0.3 * A; // hide the stop just beyond the level
-      var target = (out.bias.side === 'buy' ? out.resistances : out.supports).filter(function (l) { return l.dist >= 1.2 * slDist; })[0];
-      var tpDist = target ? target.dist : 2 * slDist;
+    if (out.preferred) {
+      var fav = out.setups[out.preferred], main = fav.tps[1];
       out.plan = {
-        side: out.bias.side,
-        entry: C.round(close, ins.digits),
-        sl: C.round(close - d * slDist, ins.digits),
-        tp: C.round(close + d * tpDist, ins.digits),
-        slPips: slDist / ins.pip, tpPips: tpDist / ins.pip, rr: tpDist / slDist,
-        slBasis: guard && guard.atrs >= 0.8 && guard.atrs <= 2.5 ? 'เลย' + (out.bias.side === 'buy' ? 'แนวรับ' : 'แนวต้าน') + 'ที่ใกล้ที่สุดไป 0.3 ATR' : '1.5 เท่าของ ATR',
-        tpBasis: target ? (out.bias.side === 'buy' ? 'แนวต้าน' : 'แนวรับ') + 'ถัดไปที่ให้ผลตอบแทนคุ้มความเสี่ยง' : '2 เท่าของระยะ SL'
+        side: fav.side, entry: fav.entry, sl: fav.sl, tp: main.price,
+        slPips: fav.slPips, tpPips: main.pips, rr: main.rr, slBasis: fav.slBasis, tpBasis: main.basis
       };
     }
 

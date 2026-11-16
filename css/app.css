@@ -493,6 +493,48 @@ dialog::backdrop { background: rgba(6, 11, 17, 0.6); -webkit-backdrop-filter: bl
 .panel-label { font-weight: 600; color: var(--ink); }
 .lg-line { width: 16px; height: 0; border-top: 2px solid var(--series); display: inline-block; }
 .lg-line.muted { border-top-color: var(--ink-3); }
+.lg-line.gold { border-top-color: var(--gold); }
+.lg-line.pos { border-top-color: var(--pos); }
+.lg-line.neg { border-top-color: var(--neg); }
+
+/* ---------- entry / exit ladder ---------- */
+.setup-card .card-head .seg { flex: none; }
+.setup-card .star { color: var(--gold-text); margin-left: 2px; }
+.seg button[aria-pressed="true"] .star { color: inherit; }
+.setup-warn {
+  margin: -4px 0 14px; padding: 9px 12px; border-radius: 10px; font-size: 13.5px;
+  color: var(--warn-ink); background: color-mix(in srgb, var(--warn-ink) 10%, var(--card)); border: 1px solid color-mix(in srgb, var(--warn-ink) 30%, var(--card));
+}
+.setup-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 22px; align-items: start; }
+.ladder { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.lad {
+  position: relative; display: grid; grid-template-columns: 6px minmax(0, 1.1fr) minmax(0, 1.3fr) minmax(0, 0.9fr); gap: 4px 14px;
+  align-items: center; padding: 10px 14px 10px 0; border-radius: 12px; background: var(--surface-2); overflow: hidden;
+}
+.lad-mark { align-self: stretch; border-radius: 0 3px 3px 0; background: var(--line-strong); }
+.lad.tp .lad-mark { background: var(--pos); }
+.lad.sl .lad-mark { background: var(--neg); }
+.lad.entry .lad-mark { background: var(--gold); }
+.lad.entry { background: var(--gold-soft); box-shadow: inset 0 0 0 1px var(--gold-line); }
+.lad.now { background: none; padding-block: 4px; }
+.lad.now .lad-mark { background: none; border-top: 1px dashed var(--line-strong); align-self: center; height: 0; }
+.lad.now .lad-name b, .lad.now .lad-price { color: var(--ink-3); font-weight: 500; font-size: 13px; }
+.lad-name { display: grid; min-width: 0; }
+.lad-name b { font-weight: 600; font-size: 14.5px; }
+.lad-name span, .lad-price span, .lad-dist span { color: var(--ink-3); font-size: 12px; font-weight: 400; }
+.lad-price { display: grid; font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 0; }
+.lad-price span { font-variant-numeric: normal; overflow-wrap: anywhere; }
+.lad-dist { display: grid; justify-items: end; text-align: right; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.lad.tp .lad-dist span { color: var(--pos-ink); font-weight: 600; font-size: 13px; }
+.lad.sl .lad-dist span { color: var(--neg-ink); font-weight: 600; font-size: 13px; }
+.setup-info { display: grid; gap: 12px; align-content: start; }
+.setup-info dl { display: grid; gap: 10px; }
+.setup-info dt { color: var(--ink-3); font-size: 12.5px; }
+.setup-info dd { font-size: 14px; color: var(--ink); }
+.kind-tag { justify-self: start; display: inline-flex; align-items: center; height: 26px; padding: 0 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600; }
+.kind-tag.trend { background: color-mix(in srgb, var(--pos) 16%, var(--card)); color: var(--pos-ink); }
+.kind-tag.counter { background: color-mix(in srgb, var(--neg) 14%, var(--card)); color: var(--neg-ink); }
+.kind-tag.range { background: var(--surface-3); color: var(--ink-2); }
 .lg-candle { width: 8px; height: 12px; border-radius: 1px; display: inline-block; border: 1.5px solid var(--pos); background: var(--card); }
 .lg-candle.down { border-color: var(--neg); background: var(--neg); }
 .lg-bar { width: 8px; height: 10px; border-radius: 1px; display: inline-block; background: linear-gradient(to right, var(--pos) 50%, var(--neg) 50%); }
@@ -541,6 +583,7 @@ dialog::backdrop { background: rgba(6, 11, 17, 0.6); -webkit-backdrop-filter: bl
   .plan { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .plan > div:last-child { grid-column: span 2; }
   .ai-grid { grid-template-columns: minmax(0, 1fr); }
+  .setup-grid { grid-template-columns: minmax(0, 1fr); }
   .brand-sub { display: none; }
 }
 @media (max-width: 760px) {
@@ -594,6 +637,12 @@ dialog::backdrop { background: rgba(6, 11, 17, 0.6); -webkit-backdrop-filter: bl
   .plan { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .plan > div:last-child { grid-column: 1 / -1; }
   .plan dd, .plan .side { font-size: 16.5px; }
+  .setup-card .card-head .seg { flex: 1 1 100%; }
+  .setup-card .card-head .seg button { flex: 1; padding: 0 8px; }
+  .lad { grid-template-columns: 5px minmax(0, 1fr) auto; padding-right: 12px; gap: 2px 10px; }
+  .lad-price { grid-column: 3; grid-row: 1; justify-items: end; text-align: right; font-size: 16px; }
+  .lad-price span { display: none; }
+  .lad-dist { grid-column: 2 / 4; grid-row: 2; justify-items: start; text-align: left; display: flex; gap: 10px; }
   .brand-name { font-size: 17.5px; }
   .topbar .btn-primary { min-height: 38px; padding: 0 13px; }
 }

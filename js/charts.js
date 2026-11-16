@@ -275,6 +275,69 @@
     return o;
   }
 
+  /*
+   * Trade levels on the price panel: a thin line per level, an entry zone band, and a label pill
+   * at the right edge. Labels are ink on the surface; only the line and the pill's edge carry the
+   * level's colour. A level outside the visible range is pinned to the edge with an arrow.
+   */
+  var tradeMarks = {
+    id: 'tfMarks',
+    beforeDatasetsDraw: function (chart, args, o) {
+      if (!o.items) return;
+      var y = chart.scales.y, area = chart.chartArea, ctx = chart.ctx;
+      o.items.forEach(function (m) {
+        if (!m.zone) return;
+        var a = Math.max(area.top, Math.min(area.bottom, y.getPixelForValue(m.zone[1])));
+        var b = Math.max(area.top, Math.min(area.bottom, y.getPixelForValue(m.zone[0])));
+        ctx.save();
+        ctx.fillStyle = alpha(o.colors[m.tone], 0.14);
+        ctx.fillRect(area.left, a, area.right - area.left, Math.max(1, b - a));
+        ctx.restore();
+      });
+    },
+    afterDatasetsDraw: function (chart, args, o) {
+      if (!o.items || !o.items.length) return;
+      var y = chart.scales.y, area = chart.chartArea, ctx = chart.ctx;
+      ctx.save();
+      ctx.font = '600 11px ' + o.font;
+      var labels = o.items.map(function (m) {
+        var py = y.getPixelForValue(m.price), edge = py < area.top ? 'up' : py > area.bottom ? 'down' : null;
+        if (!edge) {
+          ctx.strokeStyle = o.colors[m.tone];
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(area.left, Math.round(py) + 0.5);
+          ctx.lineTo(area.right, Math.round(py) + 0.5);
+          ctx.stroke();
+        }
+        return { m: m, y: edge === 'up' ? area.top + 10 : edge === 'down' ? area.bottom - 10 : py, text: m.label + (edge === 'up' ? ' ↑' : edge === 'down' ? ' ↓' : '') };
+      }).sort(function (p, q) { return p.y - q.y; });
+      // keep pills from overlapping: push each one down past the one above it, then back up if it ran off the bottom
+      for (var k = 1; k < labels.length; k++) if (labels[k].y - labels[k - 1].y < 19) labels[k].y = labels[k - 1].y + 19;
+      for (k = labels.length - 1; k >= 0; k--) {
+        var max = k === labels.length - 1 ? area.bottom - 10 : labels[k + 1].y - 19;
+        if (labels[k].y > max) labels[k].y = max;
+      }
+      labels.forEach(function (l) {
+        var w = ctx.measureText(l.text).width + 14, x = area.right - w - 4, top = l.y - 9;
+        ctx.fillStyle = o.bg;
+        ctx.strokeStyle = o.colors[l.m.tone];
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(x, top, w, 18, 5); else ctx.rect(x, top, w, 18);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = o.colors[l.m.tone];
+        ctx.fillRect(x + 1, top + 3, 2.5, 12);
+        ctx.fillStyle = o.ink;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+        ctx.fillText(l.text, x + 8, l.y + 0.5);
+      });
+      ctx.restore();
+    }
+  };
+
   /**
    * Candlesticks with overlay lines. Direction is shown twice: rising candles are
    * hollow, falling candles are solid — so it reads without relying on colour.
@@ -302,8 +365,17 @@
       });
     });
     var o = panelOptions(th, cfg.tip);
-    o.scales = { x: timeAxis(th, false), y: valueAxis(th, cfg.fmtTick, { beginAtZero: false, grace: '4%' }) };
-    return new root.Chart(canvas, { type: 'bar', data: { labels: cfg.labels, datasets: sets }, options: o, plugins: [crosshair] });
+    var marks = cfg.marks || [], yExtra = {};
+    if (marks.length) {
+      // stretch the price axis so the entry, the stop and the first two targets are on screen
+      var lo = Math.min.apply(null, cfg.candles.map(function (k) { return k.l; })), hi = Math.max.apply(null, cfg.candles.map(function (k) { return k.h; }));
+      var keep = marks.filter(function (m) { return !/^TP3/.test(m.label); });
+      keep.forEach(function (m) { lo = Math.min(lo, m.price); hi = Math.max(hi, m.price); });
+      yExtra = { suggestedMin: lo, suggestedMax: hi };
+      o.plugins.tfMarks = { items: marks, font: th.font, ink: th.ink, bg: th.tipBg, colors: { pos: th.pos, neg: th.neg, gold: cssVar('--gold') } };
+    }
+    o.scales = { x: timeAxis(th, false), y: valueAxis(th, cfg.fmtTick, Object.assign({ beginAtZero: false, grace: '4%' }, yExtra)) };
+    return new root.Chart(canvas, { type: 'bar', data: { labels: cfg.labels, datasets: sets }, options: o, plugins: [crosshair, tradeMarks] });
   }
 
   /** A 0–100 oscillator (RSI) with its 30 and 70 bounds drawn as reference lines. */

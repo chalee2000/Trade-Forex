@@ -586,7 +586,7 @@
    * Market analysis
    * ------------------------------------------------------------------ */
 
-  var mkt = { symbol: 'EURUSD', tf: '1h', status: 'idle', data: null, error: false, file: null, req: 0, key: null };
+  var mkt = { symbol: 'EURUSD', tf: '1h', status: 'idle', data: null, error: false, file: null, req: 0, key: null, side: null };
 
   function mktSymbol() { return Market.find(Market.SYMBOLS, mkt.symbol); }
   function mktTf() { return Market.find(Market.TIMEFRAMES, mkt.tf); }
@@ -694,6 +694,14 @@
 
   var mktCharts = null;
 
+  /** Horizontal lines for the active setup: targets, entry zone and stop. */
+  function setupMarks(s, px) {
+    var out = s.tps.map(function (t, k) { return { price: t.price, tone: 'pos', label: 'TP' + (k + 1) + ' ' + px(t.price) }; });
+    out.push({ price: s.entry, tone: 'gold', label: (s.side === 'buy' ? 'Buy ' : 'Sell ') + px(s.entry), zone: s.zone });
+    out.push({ price: s.sl, tone: 'neg', label: 'SL ' + px(s.sl) });
+    return out;
+  }
+
   function priceCard(a, d) {
     var sym = mktSymbol();
     var W = window.matchMedia && window.matchMedia('(max-width: 760px)').matches ? 60 : 120;
@@ -706,7 +714,7 @@
     var e20 = cut(se.ema20), e50 = cut(se.ema50), rsi = cut(se.rsi), hist = cut(se.macdHist), macd = cut(se.macd), sig = cut(se.macdSignal);
     var asTable = !!state.tables.mkt;
     var head = '<figcaption class="card-head"><div><h3>กราฟราคา ' + esc(sym.key) + (d.tfLabel ? ' ' + esc(d.tfLabel) : '') + '</h3>' +
-      '<p class="sub">' + view.length + ' แท่งล่าสุด พร้อม EMA20 และ EMA50 · RSI (14) · MACD (12, 26, 9)</p></div>' +
+      '<p class="sub">' + view.length + ' แท่งล่าสุด พร้อม EMA20, EMA50 และเส้นจุดเข้า-ออกของฝั่ง' + (activeSetup(a).side === 'buy' ? ' Buy' : ' Sell') + ' · RSI (14) · MACD (12, 26, 9)</p></div>' +
       '<button type="button" class="btn-text" data-toggle-table="mkt" aria-pressed="' + asTable + '">' + (asTable ? 'ดูกราฟ' : 'ดูตาราง') + '</button></figcaption>';
     if (asTable) {
       mktCharts = null;
@@ -721,6 +729,7 @@
       var out = [];
       out.push(Charts.candles(document.getElementById('cv-mkt-price'), {
         labels: labels, candles: view, lines: [{ values: e20, tone: 'series' }, { values: e50, tone: 'muted' }],
+        marks: setupMarks(activeSetup(a), px),
         fmtTick: function (v) { return axisPrice(v, a.digits); },
         tip: function (i) {
           var k = view[i];
@@ -742,8 +751,9 @@
       return out;
     };
     return '<figure class="card span-2">' + head +
-      '<div class="legend"><span><i class="lg-candle up"></i>แท่งขึ้น (กลวง)</span><span><i class="lg-candle down"></i>แท่งลง (ทึบ)</span><span><i class="lg-line series"></i>EMA20</span><span><i class="lg-line muted"></i>EMA50</span></div>' +
-      '<div class="chart-box" style="height:300px"><canvas id="cv-mkt-price" role="img" aria-label="กราฟแท่งเทียน ' + esc(sym.key) + ' ราคาล่าสุด ' + px(a.close) + '"></canvas></div>' +
+      '<div class="legend"><span><i class="lg-candle up"></i>แท่งขึ้น (กลวง)</span><span><i class="lg-candle down"></i>แท่งลง (ทึบ)</span><span><i class="lg-line series"></i>EMA20</span><span><i class="lg-line muted"></i>EMA50</span>' +
+      '<span><i class="lg-line gold"></i>จุดเข้า</span><span><i class="lg-line pos"></i>TP</span><span><i class="lg-line neg"></i>SL</span></div>' +
+      '<div class="chart-box" style="height:340px"><canvas id="cv-mkt-price" role="img" aria-label="กราฟแท่งเทียน ' + esc(sym.key) + ' ราคาล่าสุด ' + px(a.close) + '"></canvas></div>' +
       '<div class="legend"><span class="panel-label">RSI (14)</span><span>เส้นอ้างอิงที่ 30 และ 70</span></div>' +
       '<div class="chart-box" style="height:110px"><canvas id="cv-mkt-rsi" role="img" aria-label="RSI ล่าสุด ' + (C.isNum(a.rsi) ? a.rsi.toFixed(1) : '–') + '"></canvas></div>' +
       '<div class="legend"><span class="panel-label">MACD (12, 26, 9)</span><span><i class="lg-bar"></i>ฮิสโตแกรม</span><span><i class="lg-line series"></i>MACD</span><span><i class="lg-line muted"></i>Signal</span></div>' +
@@ -778,28 +788,69 @@
       '</section>';
   }
 
-  function planCard(a, d) {
-    var sym = mktSymbol(), p = a.plan;
+  /** The setup the viewer is looking at: their pick, else the trend side, else buy. */
+  function activeSetup(a) {
+    var side = mkt.side && a.setups[mkt.side] ? mkt.side : a.preferred || 'buy';
+    return a.setups[side];
+  }
+
+  /** A setup in the shape the lot calculator and the trade form take, with TP2 as the target. */
+  function planOf(s) {
+    return { side: s.side, entry: s.entry, sl: s.sl, tp: s.tps[1].price };
+  }
+
+  var KIND = {
+    trend: { tag: 'ตามแนวโน้ม', cls: 'trend' },
+    counter: { tag: 'สวนแนวโน้ม', cls: 'counter' },
+    range: { tag: 'เล่นในกรอบ', cls: 'range' }
+  };
+
+  /**
+   * Entry, stop and targets for one side, drawn as a price ladder: the rows are sorted by
+   * price, so a buy reads TP3 at the top down to SL at the bottom and a sell the other way up.
+   */
+  function setupCard(a, d) {
+    var sym = mktSymbol(), s = activeSetup(a);
     function px(v) { return C.fmtPrice(v, mkt.symbol, sym.asset); }
-    var head = '<div class="card-head"><div><h3>แผนตัวอย่างตามสูตร</h3><p class="sub">คำนวณจาก ATR และแนวรับ-แนวต้านเท่านั้น เพื่อใช้เป็นจุดเริ่มคิดขนาด Lot ไม่ใช่คำแนะนำให้เข้าเทรด</p></div></div>';
-    if (!p) {
-      return '<section class="card span-2">' + head + '<p class="empty-note">คะแนนรวมอยู่ที่ ' + C.fmtSigned(a.score, 0) + ' ยังไม่เอียงไปทางใดชัดพอ (ต้องเกิน ±20) จึงยังไม่มีแผนตัวอย่าง รอให้ราคาเลือกทางก่อน</p></section>';
-    }
-    function cell(k, v, note) { return '<div><dt>' + k + '</dt><dd>' + v + (note ? '<small>' + note + '</small>' : '') + '</dd></div>'; }
-    var actions = d.example ? '<p class="fine">ปุ่มส่งต่อแผนจะใช้ได้เมื่อวิเคราะห์จากราคาจริง</p>' :
-      '<div class="btn-row"><button type="button" class="btn btn-primary" data-action="plan-calc">คำนวณขนาด Lot จากแผนนี้</button><button type="button" class="btn" data-action="plan-trade">บันทึกเป็นเทรด</button></div>';
-    return '<section class="card span-2">' + head + '<dl class="plan">' +
-      cell('ฝั่ง', sideHtml(p.side), 'ตามคะแนนรวม ' + C.fmtSigned(a.score, 0)) +
-      cell('ราคาเข้า', px(p.entry), 'ราคาปิดล่าสุด') +
-      cell('Stop loss', px(p.sl), C.fmtPips(p.slPips).replace('+', '') + ' pips · ' + esc(p.slBasis)) +
-      cell('Take profit', px(p.tp), C.fmtPips(p.tpPips).replace('+', '') + ' pips · ' + esc(p.tpBasis)) +
-      cell('Reward : Risk', '1 : ' + p.rr.toFixed(2), 'ต้องชนะเกิน ' + C.fmtPct(100 / (1 + p.rr)) + ' จึงคุ้มทุน') +
-      '</dl>' + actions + '</section>';
+    function pips(v) { return C.fmtPips(v).replace('+', '') + ' pips'; }
+    var toggle = ['buy', 'sell'].map(function (side) {
+      var x = a.setups[side];
+      return '<button type="button" data-setup-side="' + side + '" aria-pressed="' + (s.side === side) + '">' +
+        (side === 'buy' ? 'จุดเข้าซื้อ (Buy)' : 'จุดเข้าขาย (Sell)') + (x.favored ? ' <span class="star" aria-label="ตามแนวโน้ม">★</span>' : '') + '</button>';
+    }).join('');
+
+    var rows = s.tps.map(function (t, k) {
+      return { role: 'tp', price: t.price, name: 'TP' + (k + 1), hint: k === 0 ? 'ปิดกำไรส่วนแรก' : k === 1 ? 'เป้าหลัก' : 'ปล่อยให้วิ่ง', dist: pips(t.pips), rr: t.rr.toFixed(2) + 'R', basis: t.basis };
+    });
+    rows.push({ role: 'entry', price: s.entry, name: s.side === 'buy' ? 'จุดเข้าซื้อ' : 'จุดเข้าขาย', hint: s.entryType === 'market' ? 'เข้าที่ราคาปัจจุบัน' : 'ตั้งรอ (Limit)', dist: 'โซน ' + px(s.zone[0]) + ' – ' + px(s.zone[1]), rr: '', basis: '' });
+    rows.push({ role: 'sl', price: s.sl, name: 'Stop loss', hint: 'ตัดขาดทุน', dist: pips(s.slPips), rr: '−1R', basis: s.slBasis });
+    if (px(a.close) !== px(s.entry)) rows.push({ role: 'now', price: a.close, name: 'ราคาล่าสุด', hint: '', dist: '', rr: '', basis: '' });
+    rows.sort(function (x, y) { return y.price - x.price; });
+
+    var ladder = rows.map(function (r) {
+      return '<li class="lad ' + r.role + '"><i class="lad-mark" aria-hidden="true"></i>' +
+        '<div class="lad-name"><b>' + esc(r.name) + '</b>' + (r.hint ? '<span>' + esc(r.hint) + '</span>' : '') + '</div>' +
+        '<div class="lad-price">' + px(r.price) + (r.basis ? '<span>' + esc(r.basis) + '</span>' : '') + '</div>' +
+        '<div class="lad-dist">' + esc(r.dist) + (r.rr ? '<span>' + r.rr + '</span>' : '') + '</div></li>';
+    }).join('');
+
+    var k = KIND[s.kind];
+    var warn = d.example ? '<p class="setup-warn">คำนวณจากแท่งเทียนสมมติ ตัวเลขชุดนี้ใช้ดูวิธีอ่านเท่านั้น ไม่ใช่จุดเข้าเทรดจริง</p>' : '';
+    var actions = d.example ? '' :
+      '<div class="btn-row"><button type="button" class="btn btn-primary" data-action="plan-calc">คำนวณขนาด Lot</button><button type="button" class="btn" data-action="plan-trade">บันทึกเป็นเทรด</button></div>';
+    return '<section class="card span-2 setup-card" aria-labelledby="setup-title">' +
+      '<div class="card-head"><div><h3 id="setup-title">จุดเข้า-ออก</h3><p class="sub">จุดเข้า จุดตัดขาดทุน และจุดทำกำไร 3 ระดับ คำนวณจาก ATR กับแนวรับ-แนวต้าน ★ คือฝั่งที่ตรงกับแนวโน้ม</p></div>' +
+      '<div class="seg" role="group" aria-label="เลือกฝั่ง">' + toggle + '</div></div>' + warn +
+      '<div class="setup-grid"><ol class="ladder" aria-label="ระดับราคาเรียงจากสูงไปต่ำ">' + ladder + '</ol>' +
+      '<div class="setup-info"><span class="kind-tag ' + k.cls + '">' + k.tag + '</span>' +
+      '<dl><div><dt>วิธีเข้า</dt><dd>' + esc(s.entryBasis) + '</dd></div><div><dt>การบริหาร</dt><dd>' + esc(s.note) + '</dd></div>' +
+      '<div><dt>คุ้มทุนเมื่อ</dt><dd>ใช้ TP2 เป็นเป้าหลัก (' + s.tps[1].rr.toFixed(2) + 'R) ต้องชนะเกิน ' + C.fmtPct(100 / (1 + s.tps[1].rr)) + ' ของครั้งที่เข้า</dd></div></dl>' +
+      actions + '<p class="fine">เป็นการคำนวณตามสูตร ไม่ได้ทำนายราคาและไม่ใช่คำแนะนำการลงทุน ตรวจกับกราฟของโบรกเกอร์ก่อนเข้าเทรดเสมอ</p></div></div></section>';
   }
 
   function renderMarket() {
     var key = mkt.symbol + '|' + mkt.tf + '|' + (mkt.file ? mkt.file.name : '');
-    if (key !== mkt.key) { mkt.key = key; loadMarket(false); }
+    if (key !== mkt.key) { mkt.key = key; mkt.side = null; loadMarket(false); }
     $('#m-symbol').value = mkt.symbol;
     $('#seg-tf').innerHTML = Market.TIMEFRAMES.map(function (t) {
       return '<button type="button" data-tf="' + t.key + '" aria-pressed="' + (!mkt.file && mkt.tf === t.key) + '"' + (mkt.file ? ' disabled' : '') + '>' + t.label + '</button>';
@@ -822,7 +873,7 @@
       return;
     }
     mkt.analysis = a;
-    body.innerHTML = mktNotice(d) + mktSummary(a, d) + '<div class="grid">' + priceCard(a, d) + signalsCard(a) + levelsCard(a) + planCard(a, d) + '</div>';
+    body.innerHTML = mktNotice(d) + mktSummary(a, d) + '<div class="grid">' + setupCard(a, d) + priceCard(a, d) + signalsCard(a) + levelsCard(a) + '</div>';
     if (mktCharts) {
       try {
         if (!window.Chart) throw new Error('Chart library missing');
@@ -849,7 +900,7 @@
    * ------------------------------------------------------------------ */
 
   var ai = { sample: null, images: null, ctl: null, file: null, url: null };
-  var AI_HEADINGS = ['สิ่งที่เห็นในภาพ', 'แนวโน้ม', 'แนวรับสำคัญ', 'แนวต้านสำคัญ', 'รูปแบบและสัญญาณ', 'สถานการณ์ที่เป็นไปได้', 'สิ่งที่ต้องระวัง', 'ความมั่นใจในการอ่านภาพ',
+  var AI_HEADINGS = ['สิ่งที่เห็นในภาพ', 'แนวโน้ม', 'แนวรับสำคัญ', 'แนวต้านสำคัญ', 'รูปแบบและสัญญาณ', 'แผนฝั่ง Buy', 'แผนฝั่ง Sell', 'ฝั่งที่ได้เปรียบกว่า', 'สถานการณ์ที่เป็นไปได้', 'สิ่งที่ต้องระวัง', 'ความมั่นใจในการอ่านภาพ',
     'ภาพรวม', 'จุดแข็ง', 'จุดที่ควรแก้', 'สิ่งที่ควรลองใน 20 เทรดถัดไป', 'ข้อควรระวังในการอ่านสถิตินี้'];
   var AI_GONE = { not_granted: 1, sampling_disabled: 1, not_declared: 1, capability_disabled: 1, capability_removed: 1 };
   var AI_ERRORS = {
@@ -920,14 +971,17 @@
 
   function chartPrompt(symbol, tf, question) {
     return 'คุณเป็นนักวิเคราะห์ทางเทคนิคที่ช่วยเทรดเดอร์รายย่อยอ่านกราฟ ภาพที่แนบมาคือภาพหน้าจอกราฟราคา' + (symbol ? 'ของ ' + symbol : '') + (tf ? ' กรอบเวลา ' + tf : '') + ' ที่ผู้ใช้อัปโหลดเอง\n\n' +
-      'อ่านจากสิ่งที่เห็นในภาพเท่านั้น ถ้าอ่านตัวเลขราคาหรือแกนเวลาไม่ชัด ให้บอกตรง ๆ ว่าอ่านไม่ได้ อย่าเดาตัวเลข และอย่าอ้างข่าวหรือข้อมูลนอกภาพ ถ้าภาพไม่ใช่กราฟราคา ให้บอกว่าไม่ใช่และไม่ต้องวิเคราะห์\n\n' +
+      'อ่านจากสิ่งที่เห็นในภาพเท่านั้น ถ้าอ่านตัวเลขราคาหรือแกนเวลาไม่ชัด ให้บอกตรง ๆ ว่าอ่านไม่ได้ อย่าเดาตัวเลข และอย่าอ้างข่าวหรือข้อมูลนอกภาพ ถ้าภาพไม่ใช่กราฟราคา ให้บอกว่าไม่ใช่และไม่ต้องวิเคราะห์ ' +
+      'ทุกราคาที่ให้ในแผนต้องอ่านได้จากแกนราคาหรือระดับที่เห็นในภาพ ถ้าอ่านแกนราคาไม่ได้ ให้บอกจุดเข้า-ออกเป็นตำแหน่งเทียบกับแนวที่เห็นแทนตัวเลข\n\n' +
       'ตอบเป็นภาษาไทย เป็นข้อความธรรมดา ไม่ใช้ Markdown ไม่ใช้เครื่องหมาย # หรือ * เขียนตามหัวข้อนี้ หัวข้อละหนึ่งย่อหน้าสั้น ๆ ขึ้นต้นด้วยชื่อหัวข้อตามด้วยเครื่องหมาย : เสมอ\n' +
       'สิ่งที่เห็นในภาพ: สินทรัพย์ กรอบเวลา อินดิเคเตอร์ที่อยู่บนกราฟ และช่วงราคาโดยประมาณ\n' +
       'แนวโน้ม: ขาขึ้น ขาลง หรือไซด์เวย์ พร้อมเหตุผลจากโครงสร้างราคา\n' +
       'แนวรับสำคัญ: ระดับราคาที่อ่านได้จากภาพ\n' +
       'แนวต้านสำคัญ: ระดับราคาที่อ่านได้จากภาพ\n' +
       'รูปแบบและสัญญาณ: แท่งเทียน รูปแบบกราฟ หรือสัญญาณจากอินดิเคเตอร์ ถ้ามี\n' +
-      'สถานการณ์ที่เป็นไปได้: สองกรณี คือถ้าราคาไปทางขึ้น และถ้าไปทางลง แต่ละกรณีบอกระดับที่ใช้ยืนยัน จุดที่แผนผิด และเป้าหมายถัดไป\n' +
+      'แผนฝั่ง Buy: จุดเข้าซื้อ (ราคาหรือโซน และเงื่อนไขก่อนเข้า) จุดตัดขาดทุน SL และจุดทำกำไร TP1 TP2 พร้อมเหตุผลสั้น ๆ ว่าแต่ละระดับมาจากอะไรในภาพ\n' +
+      'แผนฝั่ง Sell: จุดเข้าขาย (ราคาหรือโซน และเงื่อนไขก่อนเข้า) จุดตัดขาดทุน SL และจุดทำกำไร TP1 TP2 พร้อมเหตุผลสั้น ๆ\n' +
+      'ฝั่งที่ได้เปรียบกว่า: Buy, Sell หรือรอ พร้อมเหตุผล และอัตราส่วนกำไรต่อความเสี่ยงโดยประมาณของฝั่งนั้น\n' +
       'สิ่งที่ต้องระวัง: ความเสี่ยงของการอ่านแบบนี้\n' +
       'ความมั่นใจในการอ่านภาพ: สูง กลาง หรือต่ำ พร้อมเหตุผล\n\n' +
       'ปิดท้ายด้วยประโยคเดียวว่านี่คือการอ่านกราฟเชิงเทคนิค ไม่ใช่คำแนะนำการลงทุน' +
@@ -1426,7 +1480,7 @@
     'mkt-import': function () { $('#file-candles').click(); },
     'mkt-clear-file': function () { mkt.file = null; render(); },
     'plan-calc': function () {
-      var p = mkt.analysis && mkt.analysis.plan, f = $('#form-calc');
+      var p = mkt.analysis && planOf(activeSetup(mkt.analysis)), f = $('#form-calc');
       if (!p) return;
       state.calcTouched = true;
       f.symbol.value = mkt.symbol;
@@ -1435,10 +1489,10 @@
       f.tp.value = p.tp;
       if (!f.riskPct.value) f.riskPct.value = 1;
       setView('tools');
-      toast('ใส่ราคาเข้า SL และ TP จากแผนให้แล้ว เติมเงินในพอร์ตเพื่อดูขนาด Lot');
+      toast('ใส่จุดเข้า SL และ TP2 ให้แล้ว เติมเงินในพอร์ตเพื่อดูขนาด Lot');
     },
     'plan-trade': function () {
-      var p = mkt.analysis && mkt.analysis.plan;
+      var p = mkt.analysis && planOf(activeSetup(mkt.analysis));
       if (!p || !state.ready) return;
       openTrade(null, { asset: mktSymbol().asset, symbol: mkt.symbol, side: p.side, entry: p.entry, sl: p.sl, tp: p.tp });
     },
@@ -1464,6 +1518,8 @@
       if (act && ACTIONS[act.dataset.action]) { ACTIONS[act.dataset.action](act, e); return; }
       var nav = t.closest('a[data-view], a.brand');
       if (nav) { e.preventDefault(); setView(nav.dataset.view || 'market'); return; }
+      var sideBtn = t.closest('button[data-setup-side]');
+      if (sideBtn) { mkt.side = sideBtn.dataset.setupSide; render(); return; }
       var tfBtn = t.closest('button[data-tf]');
       if (tfBtn) { mkt.tf = tfBtn.dataset.tf; savePrefs(); render(); return; }
       var seg = t.closest('button[data-range], button[data-asset]');

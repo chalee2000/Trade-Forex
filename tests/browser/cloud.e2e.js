@@ -114,6 +114,7 @@ const MOCK = () => {
   assert.equal(await p.locator('#market-body .hero-value').innerText(), '1.10230', 'example ends at the reference quote');
   assert.equal(await p.locator('#btn-mkt-refresh').isVisible(), false);
   assert.equal(await p.locator('[data-action="plan-calc"]').count(), 0);
+  assert.match(await p.locator('.setup-warn').innerText(), /ไม่ใช่จุดเข้าเทรดจริง/, 'example setups are marked as not for trading');
   await p.waitForSelector('#ai-chart:not([hidden])');
   await p.waitForFunction(() => document.querySelector('#view-market').firstElementChild.id === 'ai-chart');
   assert.deepEqual(external, [], 'the artifact build must not call out to the network');

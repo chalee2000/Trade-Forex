@@ -73,7 +73,7 @@
     <section id="ai-chart" class="card ai-card" aria-labelledby="ai-chart-title" hidden>
       <div class="card-head"><div>
         <h2 class="h3" id="ai-chart-title">ให้ AI อ่านกราฟของคุณ</h2>
-        <p class="sub">แคปหน้าจอกราฟจาก MT4, MT5 หรือ TradingView แล้วอัปโหลด Claude จะอ่านแนวโน้ม แนวรับ-แนวต้าน และสถานการณ์ที่เป็นไปได้จากภาพ</p>
+        <p class="sub">แคปหน้าจอกราฟจาก MT4, MT5 หรือ TradingView แล้วอัปโหลด Claude จะอ่านแนวโน้ม แนวรับ-แนวต้าน และบอกจุดเข้าซื้อ-ขาย จุดตัดขาดทุน และจุดทำกำไรจากภาพ</p>
       </div></div>
       <div class="ai-grid">
         <form id="form-ai-chart" class="ai-form" novalidate>
@@ -82,7 +82,7 @@
           <div class="form-grid">
             <div class="field span-3"><label for="ai-symbol">สินทรัพย์ในภาพ <span class="opt">ไม่บังคับ</span></label><input id="ai-symbol" maxlength="20" autocomplete="off" placeholder="เช่น EURUSD"></div>
             <div class="field span-3"><label for="ai-tf">กรอบเวลา <span class="opt">ไม่บังคับ</span></label><input id="ai-tf" maxlength="10" autocomplete="off" placeholder="เช่น H1"></div>
-            <div class="field span-6"><label for="ai-question">อยากให้ดูอะไรเป็นพิเศษ <span class="opt">ไม่บังคับ</span></label><textarea id="ai-question" rows="2" maxlength="400" placeholder="เช่น ควรรอจังหวะ Buy ตรงไหน"></textarea></div>
+            <div class="field span-6"><label for="ai-question">อยากให้ดูอะไรเป็นพิเศษ <span class="opt">ไม่บังคับ</span></label><textarea id="ai-question" rows="2" maxlength="400" placeholder="เช่น เน้นแผน Buy หรือดูกรอบ H4 ด้วย"></textarea></div>
           </div>
           <div class="btn-row">
             <button type="submit" class="btn btn-primary" id="btn-ai-chart">ให้ AI วิเคราะห์ภาพนี้</button>
