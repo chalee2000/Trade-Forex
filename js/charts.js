@@ -233,5 +233,110 @@
     });
   }
 
-  root.TFCharts = { line: line, bars: bars, theme: theme, alpha: alpha };
+  /* ------------------------------------------------------------------ *
+   * Market charts: candles, RSI and MACD stacked on one shared time axis.
+   * Every panel reserves the same width for its value axis so the plots line up.
+   * ------------------------------------------------------------------ */
+
+  var AXIS_W = 64;
+
+  function timeAxis(th, show) {
+    return {
+      offset: true, grid: { display: false }, border: { color: th.baseline },
+      ticks: { display: show, color: th.ink3, font: axisFont(th), maxRotation: 0, autoSkip: true, maxTicksLimit: 6, autoSkipPadding: 28 }
+    };
+  }
+
+  function valueAxis(th, fmt, extra) {
+    return Object.assign({
+      position: 'right',
+      afterFit: function (scale) { scale.width = AXIS_W; },
+      grid: { color: th.line, drawTicks: false }, border: { display: false },
+      ticks: { color: th.ink3, font: axisFont(th), padding: 8, maxTicksLimit: 6, callback: function (v) { return fmt(v); } }
+    }, extra || {});
+  }
+
+  function panelOptions(th, tip) {
+    var o = baseOptions(th);
+    o.layout = { padding: { top: 6, right: 0, bottom: 0, left: 4 } };
+    o.interaction = { mode: 'index', intersect: false };
+    o.plugins.tooltip = tooltip(th, tip);
+    o.plugins.tfCrosshair = { color: th.baseline };
+    return o;
+  }
+
+  /**
+   * Candlesticks with overlay lines. Direction is shown twice: rising candles are
+   * hollow, falling candles are solid — so it reads without relying on colour.
+   * cfg: { labels, candles: [{o,h,l,c}], lines: [{ values, tone: 'series'|'muted' }], fmtTick, tip }
+   */
+  function candles(canvas, cfg) {
+    var th = theme();
+    var up = cfg.candles.map(function (k) { return k.c >= k.o; });
+    var edge = up.map(function (u) { return u ? th.pos : th.neg; });
+    var sets = [{
+      type: 'bar', data: cfg.candles.map(function (k) { return [k.l, k.h]; }),
+      backgroundColor: edge, hoverBackgroundColor: edge, barThickness: 1, grouped: false, order: 3, borderRadius: 0, borderSkipped: false
+    }, {
+      type: 'bar', data: cfg.candles.map(function (k) { return [Math.min(k.o, k.c), Math.max(k.o, k.c)]; }),
+      backgroundColor: up.map(function (u) { return u ? th.surface : th.neg; }),
+      hoverBackgroundColor: up.map(function (u) { return u ? th.surface : th.neg; }),
+      borderColor: edge, hoverBorderColor: edge, borderWidth: 1.5, grouped: false, order: 2,
+      barPercentage: 0.7, categoryPercentage: 1, maxBarThickness: 14, minBarLength: 2, borderRadius: 1, borderSkipped: false
+    }];
+    (cfg.lines || []).forEach(function (l) {
+      var color = l.tone === 'muted' ? th.ink3 : th.series;
+      sets.push({
+        type: 'line', data: l.values, borderColor: color, borderWidth: 1.5, borderJoinStyle: 'round',
+        pointRadius: 0, pointHoverRadius: 0, tension: 0, order: 1, spanGaps: false
+      });
+    });
+    var o = panelOptions(th, cfg.tip);
+    o.scales = { x: timeAxis(th, false), y: valueAxis(th, cfg.fmtTick, { beginAtZero: false, grace: '4%' }) };
+    return new root.Chart(canvas, { type: 'bar', data: { labels: cfg.labels, datasets: sets }, options: o, plugins: [crosshair] });
+  }
+
+  /** A 0–100 oscillator (RSI) with its 30 and 70 bounds drawn as reference lines. */
+  function osc(canvas, cfg) {
+    var th = theme();
+    var o = panelOptions(th, cfg.tip);
+    o.scales = {
+      x: timeAxis(th, false),
+      y: valueAxis(th, function (v) { return String(v); }, {
+        min: 0, max: 100,
+        afterBuildTicks: function (scale) { scale.ticks = [0, 30, 50, 70, 100].map(function (v) { return { value: v }; }); },
+        grid: { drawTicks: false, color: function (c) { return c.tick && (c.tick.value === 30 || c.tick.value === 70) ? th.baseline : th.line; } }
+      })
+    };
+    return new root.Chart(canvas, {
+      type: 'line',
+      data: { labels: cfg.labels, datasets: [{ data: cfg.values, borderColor: th.series, borderWidth: 2, borderJoinStyle: 'round', pointRadius: 0, pointHoverRadius: 4, pointHoverBackgroundColor: th.series, pointHoverBorderColor: th.surface, pointHoverBorderWidth: 2, tension: 0, spanGaps: false }] },
+      options: o, plugins: [crosshair]
+    });
+  }
+
+  /** MACD: histogram bars by sign, with the MACD and signal lines over them. */
+  function macdPanel(canvas, cfg) {
+    var th = theme();
+    var colors = cfg.hist.map(function (v) { return v < 0 ? th.neg : th.pos; });
+    var o = panelOptions(th, cfg.tip);
+    o.scales = {
+      x: timeAxis(th, true),
+      y: valueAxis(th, cfg.fmtTick, { grid: { drawTicks: false, color: function (c) { return c.tick && c.tick.value === 0 ? th.baseline : th.line; } } })
+    };
+    return new root.Chart(canvas, {
+      type: 'bar',
+      data: {
+        labels: cfg.labels,
+        datasets: [
+          { type: 'bar', data: cfg.hist, backgroundColor: colors, hoverBackgroundColor: colors, order: 3, barPercentage: 0.7, categoryPercentage: 1, maxBarThickness: 14, borderRadius: 1 },
+          { type: 'line', data: cfg.macd, borderColor: th.series, borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 0, tension: 0, order: 1 },
+          { type: 'line', data: cfg.signal, borderColor: th.ink3, borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 0, tension: 0, order: 2 }
+        ]
+      },
+      options: o, plugins: [crosshair]
+    });
+  }
+
+  root.TFCharts = { line: line, bars: bars, candles: candles, osc: osc, macd: macdPanel, theme: theme, alpha: alpha };
 })(typeof self !== 'undefined' ? self : this);

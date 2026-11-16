@@ -24,10 +24,94 @@ const { serve } = require('./serve');
   const txt = sel => p.locator(sel).first().innerText();
   const step = (name) => console.log('ok  ' + name);
 
+  // ---- market analysis, against a stand-in for the Kraken OHLC endpoint ----
+  const asked = [];
+  await p.route(/api\.kraken\.com/, route => {
+    const u = new globalThis.URL(route.request().url());
+    const pair = u.searchParams.get('pair'), tf = Number(u.searchParams.get('interval'));
+    asked.push(pair + ':' + tf);
+    if (pair === 'USDCAD') return route.abort();
+    const base = { EURUSD: 1.165, PAXGUSD: 4120, XBTUSD: 104500 }[pair] || 1.3;
+    // a steady climb with a ripple, so the reading is predictably bullish
+    const end = Math.floor(Date.now() / (tf * 60000)) * tf * 60000;
+    const rows = Array.from({ length: 400 }, (_, i) => {
+      const c = base * (1 + i * 0.00025 + Math.sin(i / 4) * 0.0008), o = base * (1 + (i - 1) * 0.00025 + Math.sin((i - 1) / 4) * 0.0008);
+      return [(end - (399 - i) * tf * 60000) / 1000, String(o), String(Math.max(o, c) * 1.0004), String(Math.min(o, c) * 0.9996), String(c), String(c), '12.5', 9];
+    });
+    route.fulfill({ contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify({ error: [], result: { ['Z' + pair]: rows, last: rows[399][0] } }) });
+  });
+
   await p.goto(URL);
-  await p.waitForSelector('.summary');
+  await p.waitForSelector('#cv-mkt-price');
+  assert.equal(await p.evaluate(() => window.TFApp.state.view), 'market');
+  assert.match(await txt('.source-line'), /ราคาจาก Kraken \(EURUSD\)/);
+  assert.match(await txt('.hero-label'), /EUR\/USD · H1/);
+  assert.match(await txt('#market-body .kpis'), /ขาขึ้น/);
+  assert.equal(await p.locator('#market-body .banner').count(), 0, 'live prices carry no example banner');
+  assert.equal(await p.locator('#ai-chart').isVisible(), false, 'no Claude outside an artifact');
+  step('market view loads live candles and reads an uptrend');
+
+  await p.selectOption('#m-symbol', 'XAUUSD');
+  await p.waitForFunction(() => /PAXG/.test((document.querySelector('.source-line') || {}).textContent || ''));
+  await p.click('#seg-tf button[data-tf="4h"]');
+  await p.waitForFunction(() => /H4/.test((document.querySelector('.hero-label') || {}).textContent || ''));
+  assert.deepEqual(asked.slice(0, 3), ['EURUSD:60', 'PAXGUSD:60', 'PAXGUSD:240']);
+  await p.click('[data-toggle-table="mkt"]');
+  assert.equal(await p.locator('#market-body figure tbody tr').count(), 40);
+  await p.click('[data-toggle-table="mkt"]');
+  await p.waitForSelector('#cv-mkt-macd');
+  step('symbol and timeframe switches, gold proxy is disclosed, table twin');
+
+  // the formula plan feeds the lot calculator and the trade form
+  const plan = await p.evaluate(() => window.TFApp.market.analysis.plan);
+  assert.equal(plan.side, 'buy');
+  assert.ok(plan.sl < plan.entry && plan.entry < plan.tp);
+  await p.click('[data-action="plan-calc"]');
+  assert.equal(await p.evaluate(() => window.TFApp.state.view), 'tools');
+  assert.equal(await p.inputValue('#c-symbol'), 'XAUUSD');
+  assert.equal(Number(await p.inputValue('#c-sl')), plan.sl);
+  await p.fill('#c-balance', '10000');
+  assert.match(await txt('.calc-lots'), /\d\.\d\d Lot/);
+  await p.click('.tabs a[data-view="market"]');
+  await p.waitForSelector('[data-action="plan-trade"]');
+  await p.click('[data-action="plan-trade"]');
+  await p.waitForSelector('#dlg-trade[open]');
+  assert.equal(await p.inputValue('#f-symbol'), 'XAUUSD');
+  assert.equal(Number(await p.inputValue('#f-tp')), plan.tp);
+  assert.ok(await p.isChecked('#f-asset-gold') && await p.isChecked('#f-side-buy'));
+  await p.click('#dlg-trade [data-action="close-dialog"]');
+  step('plan prefills the lot calculator and the trade form');
+
+  // a provider failure falls back to clearly-labelled example candles
+  await p.selectOption('#m-symbol', 'USDCAD');
+  await p.waitForSelector('#market-body .banner .tag');
+  assert.match(await txt('#market-body .banner'), /โหลดราคาสดของ USD\/CAD ไม่ได้[\s\S]*ไม่ใช่ราคาตลาดจริง/);
+  assert.match(await txt('.hero-label'), /ราคาตัวอย่าง/);
+  assert.equal(await p.locator('[data-action="plan-calc"]').count(), 0, 'example prices cannot be sent on as a plan');
+  step('failed price load is reported and falls back to labelled examples');
+
+  // an MT4 history file
+  const mt4 = Array.from({ length: 150 }, (_, i) => {
+    const d = new Date(2026, 9, 1, i), c = 1.33 - i * 0.0003 + Math.sin(i / 3) * 0.0006, o = 1.33 - (i - 1) * 0.0003 + Math.sin((i - 1) / 3) * 0.0006;
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())},${pad(d.getHours())}:00,${o.toFixed(5)},${(Math.max(o, c) + 0.0003).toFixed(5)},${(Math.min(o, c) - 0.0003).toFixed(5)},${c.toFixed(5)},100`;
+  }).join('\n');
+  fs.writeFileSync(path.join(TMP, 'GBPUSD60.csv'), mt4);
+  await p.setInputFiles('#file-candles', path.join(TMP, 'GBPUSD60.csv'));
+  await p.waitForFunction(() => /GBPUSD60\.csv/.test((document.querySelector('.source-line') || {}).textContent || ''));
+  assert.equal(await p.inputValue('#m-symbol'), 'GBPUSD');
+  assert.match(await txt('.source-line'), /150 แท่ง · H1/);
+  assert.match(await txt('#market-body .kpis'), /ขาลง/);
+  assert.ok(await p.isDisabled('#seg-tf button[data-tf="1h"]'));
+  await p.click('[data-action="mkt-clear-file"]');
+  await p.waitForFunction(() => /Kraken/.test((document.querySelector('.source-line') || {}).textContent || ''));
+  step('price file import (MT4 format) is analysed and can be dismissed');
+
+  // ---- journal ----
+  await p.click('.tabs a[data-view="overview"]');
+  await p.waitForSelector('#overview-body .summary');
   assert.ok(await p.locator('.banner .tag').first().isVisible());
-  assert.match(await txt('.hero-value'), /\+\$1,075\.52/);
+  assert.match(await txt('#overview-body .hero-value'), /\+\$1,075\.52/);
   step('demo shown on first load');
 
   // empty submit -> validation
@@ -59,7 +143,7 @@ const { serve } = require('./serve');
   await p.fill('#f-notes', 'ทดสอบ <script>alert(1)</script>');
   await p.click('#btn-save-trade');
   await p.waitForSelector('#dlg-trade:not([open])', { state: 'attached' });
-  await p.waitForFunction(() => /\+\$124\.00/.test(document.querySelector('.hero-value').textContent));
+  await p.waitForFunction(() => /\+\$124\.00/.test(document.querySelector('#overview-body .hero-value').textContent));
   assert.equal(await p.locator('.banner').count(), 0);
   step('first trade saved, demo gone, hero = +$124.00');
 
@@ -77,14 +161,14 @@ const { serve } = require('./serve');
   await p.fill('#f-pnl', '-53.5');
   assert.match(await txt('#f-pnl-hint'), /คำนวณจากราคาได้ −\$50\.00/);
   await p.click('#btn-save-trade');
-  await p.waitForFunction(() => /\+\$70\.50/.test(document.querySelector('.hero-value').textContent));
+  await p.waitForFunction(() => /\+\$70\.50/.test(document.querySelector('#overview-body .hero-value').textContent));
   step('second trade with broker P/L override, hero = +$70.50');
 
   // persistence across reload
   await p.reload();
-  await p.waitForSelector('.summary');
-  assert.match(await txt('.hero-value'), /\+\$70\.50/);
-  assert.match(await txt('.hero-meta'), /2 เทรด · ชนะ 1 · แพ้ 1/);
+  await p.waitForSelector('#overview-body .summary');
+  assert.match(await txt('#overview-body .hero-value'), /\+\$70\.50/);
+  assert.match(await txt('#overview-body .hero-meta'), /2 เทรด · ชนะ 1 · แพ้ 1/);
   step('trades persist across reload');
 
   // journal: escaping, search, edit
@@ -163,14 +247,14 @@ const { serve } = require('./serve');
   // overview with start balance, table twin, filters
   await p.click('.tabs a[data-view="overview"]');
   await p.waitForSelector('#cv-equity');
-  assert.match(await txt('.hero-meta'), /ผลตอบแทน .*จากทุน \$5,000/);
+  assert.match(await txt('#overview-body .hero-meta'), /ผลตอบแทน .*จากทุน \$5,000/);
   await p.click('[data-toggle-table="equity"]');
   await p.waitForSelector('#overview-body figure table');
   assert.equal(await p.locator('#overview-body figure tbody tr').count(), 3);
   await p.click('[data-toggle-table="equity"]');
   await p.waitForSelector('#cv-equity');
   await p.click('#seg-asset button[data-asset="gold"]');
-  assert.match(await txt('.hero-meta'), /1 เทรด/);
+  assert.match(await txt('#overview-body .hero-meta'), /1 เทรด/);
   await p.click('#seg-asset button[data-asset="crypto"]');
   await p.click('#seg-range button[data-range="7d"]');
   await p.click('#seg-range button[data-range="all"]');
@@ -196,7 +280,7 @@ const { serve } = require('./serve');
   await p.waitForSelector('.empty');
   assert.match(await txt('.empty h2'), /ยังไม่มีเทรดในสมุด/);
   await p.click('[data-action="show-demo"]');
-  await p.waitForSelector('.summary');
+  await p.waitForSelector('#overview-body .summary');
   step('clear all -> empty state -> demo on request');
 
   // hash deep link

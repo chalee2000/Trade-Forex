@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap">
 <!-- /page:head -->
-<meta name="description" content="สมุดบันทึกและวิเคราะห์การเทรด Forex ทองคำ และบิตคอยน์ พร้อมกราฟและสถิติ">
+<meta name="description" content="วิเคราะห์กราฟ Forex ทองคำ และบิตคอยน์ด้วยอินดิเคเตอร์ พร้อมสมุดบันทึกและสถิติการเทรด">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2314263f'/%3E%3Cpath d='M10 6v20M22 6v20' stroke='%23fff' stroke-width='1.6'/%3E%3Crect x='7' y='11' width='6' height='9' rx='1' fill='%231baf7a'/%3E%3Crect x='19' y='9' width='6' height='11' rx='1' fill='%23e34948'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="css/app.css">
 </head>
@@ -18,15 +18,16 @@
 <!-- page:body -->
 <header class="topbar">
   <div class="wrap topbar-in">
-    <a class="brand" href="#overview" aria-label="Trade-Forex หน้าภาพรวม">
+    <a class="brand" href="#market" aria-label="Trade-Forex หน้าแรก">
       <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" class="bm-bg"/><path d="M10 6v20M22 6v20" class="bm-wick"/><rect x="7" y="11" width="6" height="9" rx="1" class="bm-up"/><rect x="19" y="9" width="6" height="11" rx="1" class="bm-down"/></svg>
       <span class="brand-name">Trade-Forex</span>
-      <span class="brand-sub">สมุดเทรด</span>
+      <span class="brand-sub">วิเคราะห์และบันทึกการเทรด</span>
     </a>
     <nav class="tabs" aria-label="หน้าหลัก">
+      <a href="#market" data-view="market"><span class="tab-l">วิเคราะห์ตลาด</span><span class="tab-s">วิเคราะห์</span></a>
       <a href="#overview" data-view="overview">ภาพรวม</a>
-      <a href="#journal" data-view="journal">บันทึกเทรด</a>
-      <a href="#analysis" data-view="analysis">วิเคราะห์</a>
+      <a href="#journal" data-view="journal"><span class="tab-l">บันทึกเทรด</span><span class="tab-s">บันทึก</span></a>
+      <a href="#analysis" data-view="analysis">สถิติ</a>
       <a href="#tools" data-view="tools">เครื่องมือ</a>
     </nav>
     <button type="button" class="btn btn-primary" id="btn-add" data-action="add-trade">
@@ -49,7 +50,51 @@
     </div>
   </section>
 
-  <section id="view-overview" class="view" aria-label="ภาพรวม">
+  <section id="view-market" class="view" aria-label="วิเคราะห์ตลาด">
+    <div class="toolbar mkt-toolbar">
+      <div class="filter-group">
+        <label class="filter-label" for="m-symbol">สินทรัพย์</label>
+        <select id="m-symbol" class="select-inline"></select>
+      </div>
+      <div class="filter-group">
+        <span class="filter-label" id="lbl-tf">กรอบเวลา</span>
+        <div class="seg" role="group" aria-labelledby="lbl-tf" id="seg-tf"></div>
+      </div>
+      <div class="toolbar-actions">
+        <button type="button" class="btn" data-action="mkt-refresh" id="btn-mkt-refresh" hidden>รีเฟรชราคา</button>
+        <button type="button" class="btn" data-action="mkt-import">นำเข้าไฟล์ราคา</button>
+      </div>
+    </div>
+    <div id="market-body" class="stack">
+      <div class="card loading-card"><p class="loading-title">กำลังเตรียมกราฟ…</p><p class="muted">ราคา อินดิเคเตอร์ แนวรับ-แนวต้าน และสรุปแนวโน้มจะแสดงที่นี่</p></div>
+    </div>
+
+    <section id="ai-chart" class="card ai-card" aria-labelledby="ai-chart-title" hidden>
+      <div class="card-head"><div>
+        <h2 class="h3" id="ai-chart-title">ให้ AI อ่านกราฟของคุณ</h2>
+        <p class="sub">แคปหน้าจอกราฟจาก MT4, MT5 หรือ TradingView แล้วอัปโหลด Claude จะอ่านแนวโน้ม แนวรับ-แนวต้าน และสถานการณ์ที่เป็นไปได้จากภาพ</p>
+      </div></div>
+      <div class="ai-grid">
+        <form id="form-ai-chart" class="ai-form" novalidate>
+          <label class="drop" for="ai-file"><span id="ai-drop-text">แตะเพื่อเลือกภาพกราฟ</span><img id="ai-preview" alt="ภาพกราฟที่เลือก" hidden></label>
+          <input type="file" id="ai-file" accept="image/png,image/jpeg,image/webp" class="sr-only">
+          <div class="form-grid">
+            <div class="field span-3"><label for="ai-symbol">สินทรัพย์ในภาพ <span class="opt">ไม่บังคับ</span></label><input id="ai-symbol" maxlength="20" autocomplete="off" placeholder="เช่น EURUSD"></div>
+            <div class="field span-3"><label for="ai-tf">กรอบเวลา <span class="opt">ไม่บังคับ</span></label><input id="ai-tf" maxlength="10" autocomplete="off" placeholder="เช่น H1"></div>
+            <div class="field span-6"><label for="ai-question">อยากให้ดูอะไรเป็นพิเศษ <span class="opt">ไม่บังคับ</span></label><textarea id="ai-question" rows="2" maxlength="400" placeholder="เช่น ควรรอจังหวะ Buy ตรงไหน"></textarea></div>
+          </div>
+          <div class="btn-row">
+            <button type="submit" class="btn btn-primary" id="btn-ai-chart">ให้ AI วิเคราะห์ภาพนี้</button>
+            <button type="button" class="btn" id="btn-ai-chart-stop" data-action="ai-stop" hidden>หยุด</button>
+          </div>
+        </form>
+        <div class="ai-out" id="ai-chart-out" aria-live="polite"><p class="muted">ผลการอ่านกราฟจะแสดงตรงนี้</p></div>
+      </div>
+      <p class="fine">แต่ละครั้งใช้โควตา Claude ของคุณเอง AI อ่านจากภาพเท่านั้น ไม่รู้ราคาปัจจุบันหรือข่าว และอ่านผิดได้ ใช้ประกอบการตัดสินใจ ไม่ใช่คำแนะนำการลงทุน</p>
+    </section>
+  </section>
+
+  <section id="view-overview" class="view" aria-label="ภาพรวม" hidden>
     <div id="overview-body" class="stack">
       <div class="card loading-card"><p class="loading-title">กำลังเปิดสมุดเทรด…</p><p class="muted">กำไร/ขาดทุนรวม เส้นเงินทุน และสถิติของคุณจะแสดงที่นี่</p></div>
     </div>
@@ -70,8 +115,20 @@
     <div id="journal-body" class="stack"></div>
   </section>
 
-  <section id="view-analysis" class="view" aria-label="วิเคราะห์" hidden>
+  <section id="view-analysis" class="view" aria-label="สถิติการเทรด" hidden>
     <div id="analysis-body" class="stack"></div>
+    <section id="ai-coach" class="card ai-card" aria-labelledby="ai-coach-title" hidden>
+      <div class="card-head"><div>
+        <h2 class="h3" id="ai-coach-title">ให้ AI สรุปการเทรดของคุณ</h2>
+        <p class="sub">ส่งสถิติของช่วงที่เลือก (ไม่ส่งโน้ต) ให้ Claude สรุปจุดแข็ง จุดที่ควรแก้ และสิ่งที่ควรลองในเทรดถัดไป</p>
+      </div>
+      <div class="btn-row">
+        <button type="button" class="btn btn-primary" id="btn-ai-coach" data-action="ai-coach">ขอสรุปจาก AI</button>
+        <button type="button" class="btn" id="btn-ai-coach-stop" data-action="ai-stop" hidden>หยุด</button>
+      </div></div>
+      <div class="ai-out" id="ai-coach-out" aria-live="polite" hidden></div>
+      <p class="fine">ใช้โควตา Claude ของคุณเอง คำตอบสร้างจากสถิติของคุณเท่านั้น และไม่ใช่คำแนะนำการลงทุน</p>
+    </section>
   </section>
 
   <section id="view-tools" class="view" aria-label="เครื่องมือ" hidden>
@@ -118,6 +175,7 @@
 </main>
 
 <input type="file" id="file-import" accept=".csv,.json,text/csv,application/json" hidden>
+<input type="file" id="file-candles" accept=".csv,.txt,text/csv,text/plain" hidden>
 
 <dialog id="dlg-trade" class="dialog" aria-labelledby="dlg-trade-title">
   <form id="form-trade" novalidate>
@@ -220,7 +278,9 @@
 
 <script src="vendor/chart.umd.min.js"></script>
 <script src="js/core.js"></script>
+<script src="js/ta.js"></script>
 <script src="js/sample.js"></script>
+<script src="js/market.js"></script>
 <script src="js/store.js"></script>
 <script src="js/charts.js"></script>
 <script src="js/app.js"></script>

@@ -138,5 +138,50 @@
     return out;
   }
 
-  return { sampleTrades: sampleTrades, START_BALANCE: 5000 };
+  /* Illustrative price levels and typical daily move (%), per symbol. */
+  var PRICE_SPECS = {
+    EURUSD: { base: 1.165, vol: 0.5 }, GBPUSD: { base: 1.332, vol: 0.55 }, USDJPY: { base: 153.4, vol: 0.6 },
+    AUDUSD: { base: 0.655, vol: 0.6 }, USDCHF: { base: 0.802, vol: 0.5 }, USDCAD: { base: 1.392, vol: 0.4 },
+    NZDUSD: { base: 0.592, vol: 0.6 }, XAUUSD: { base: 4120, vol: 1.1 }, BTCUSD: { base: 104500, vol: 2.4 }
+  };
+
+  function hash(str) {
+    var h = 2166136261;
+    for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+
+  /**
+   * Made-up candles for showing the market view when no real prices are available.
+   * A random walk whose drift changes every few dozen bars, so it has trends and
+   * ranges like a real chart. Deterministic per symbol and timeframe. NOT market data.
+   */
+  function sampleCandles(symbol, tfMinutes, count, now) {
+    var spec = PRICE_SPECS[symbol] || PRICE_SPECS.EURUSD;
+    var ins = C.instrument(symbol);
+    var rnd = mulberry32(hash(symbol + ':' + tfMinutes));
+    function gauss() { return (rnd() + rnd() + rnd() + rnd() - 2) * 1.22; }
+    var step = (spec.vol / 100) * Math.sqrt(tfMinutes / 1440);
+    var tf = tfMinutes * 60000;
+    var end = Math.floor((now || new Date()).getTime() / tf) * tf;
+    var price = spec.base * (1 + (rnd() - 0.5) * 0.02), drift = 0, out = [];
+    for (var i = 0; i < count; i++) {
+      if (i % 45 === 0) drift = [0.16, -0.14, 0, 0.1, -0.08, 0.2][Math.floor(rnd() * 6)] * step;
+      var o = price;
+      var c = o * (1 + drift + step * gauss());
+      var h = Math.max(o, c) * (1 + Math.abs(gauss()) * step * 0.45);
+      var l = Math.min(o, c) * (1 - Math.abs(gauss()) * step * 0.45);
+      out.push({ t: end - (count - 1 - i) * tf, o: o, h: h, l: l, c: c, v: Math.round(500 + rnd() * 1500) });
+      price = c;
+    }
+    // slide the whole walk so it finishes near the symbol's illustrative level
+    var k = spec.base / price;
+    out.forEach(function (x) {
+      x.o = C.round(x.o * k, ins.digits); x.c = C.round(x.c * k, ins.digits);
+      x.h = Math.max(C.round(x.h * k, ins.digits), x.o, x.c); x.l = Math.min(C.round(x.l * k, ins.digits), x.o, x.c);
+    });
+    return out;
+  }
+
+  return { sampleTrades: sampleTrades, sampleCandles: sampleCandles, START_BALANCE: 5000 };
 });

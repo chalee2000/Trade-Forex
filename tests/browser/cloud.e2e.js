@@ -1,7 +1,7 @@
 'use strict';
 /*
  * Browser test of the artifact build against an in-memory stand-in for the Claude
- * `db`, `user` and `downloads` capabilities. The stand-in is deliberately awkward:
+ * `db`, `user`, `downloads` and `sample` capabilities. The stand-in is deliberately awkward:
  * every write is followed by a late, out-of-order echo of the state before it.
  * Needs Playwright:  npm i -D playwright  &&  node tests/browser/cloud.e2e.js
  */
@@ -62,12 +62,28 @@ const MOCK = () => {
       onSnapshot(next) { const l = { type: 'col', path: p, next }; listeners.push(l); setTimeout(() => next(colSnap(p, data)), 20); return () => listeners.splice(listeners.indexOf(l), 1); }
     };
   }
+  // `sample`: streams a canned answer in two parts; M.sampleFail makes the next call reject with that code
+  M.samples = [];
+  M.sampleFail = null;
+  const ANSWER = 'แนวโน้ม: ขาขึ้น ราคาทำจุดสูงสุดใหม่ต่อเนื่อง\nแนวรับสำคัญ: 1.1620\n**ข้อความอื่น** <b>ไม่ใช่ HTML</b>';
+  const sample = (input, opts) => new Promise((res, rej) => {
+    opts = opts || {};
+    M.samples.push({ input: String(input), images: opts.images ? opts.images.length : 0, imageType: opts.images && opts.images[0] ? opts.images[0].type : null });
+    if (M.sampleFail) { const code = M.sampleFail; M.sampleFail = null; return setTimeout(() => rej({ code, message: 'mock ' + code }), 20); }
+    if (opts.signal) opts.signal.addEventListener('abort', () => rej({ code: 'cancelled', message: 'aborted', text: ANSWER.slice(0, 30) }));
+    setTimeout(() => opts.onText && !opts.signal.aborted && opts.onText({ text: ANSWER.slice(0, 30), delta: ANSWER.slice(0, 30) }), 20);
+    setTimeout(() => { if (opts.signal && opts.signal.aborted) return; if (opts.onText) opts.onText({ text: ANSWER, delta: ANSWER.slice(30) }); res({ text: ANSWER, truncated: false, modelTierApplied: 'default' }); }, M.sampleDelay || 80);
+  });
+  sample.limits = async () => ({ maxPromptBytes: 262144, images: { maxCount: 4, maxInputBytes: 20 * 1024 * 1024, mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] } });
   const caps = {
+    sample,
     db: Object.freeze({ doc, collection }),
     user: Object.freeze({ id: async () => 'u_test-1', isOwner: async () => true }),
     downloads: Object.freeze({ save: async r => { M.downloads.push({ filename: r.filename, head: String(r.data).slice(0, 40) }); return { status: 'saved' }; } })
   };
-  window.claude = { use: name => new Promise(res => setTimeout(() => res(caps[name] || null), 30)) };
+  // how long the host takes to hand over a capability; a test can stretch it to see the loading frame
+  const wait = Number(sessionStorage.getItem('__mockWait') || 30);
+  window.claude = { use: name => new Promise(res => setTimeout(() => res(caps[name] || null), wait)) };
 };
 
 (async () => {
@@ -82,14 +98,72 @@ const MOCK = () => {
   p.on('console', m => { if (m.type() === 'error' && !/ERR_FAILED/.test(m.text())) errors.push(m.text()); });
   p.on('pageerror', e => errors.push('PAGEERROR ' + e.message));
   await p.route(/fonts\.(googleapis|gstatic)\.com/, r => r.abort());
+  const external = [];
+  p.on('request', r => { if (!r.url().startsWith(site.url) && !/fonts\.g/.test(r.url()) && !r.url().startsWith('blob:') && !r.url().startsWith('data:')) external.push(r.url()); });
   const step = n => console.log('ok  ' + n);
   const mock = () => p.evaluate(() => ({ d: window.__mock.data(), writes: window.__mock.writes, log: window.__mock.log, max: window.__mock.maxInFlight, dl: window.__mock.downloads }));
   const settle = () => p.waitForFunction(() => window.__mock.inFlight === 0 && !window.TFApp.store.saving, null, { timeout: 15000 }).then(() => p.waitForTimeout(80));
   const BASE = 'data/users/u_test-1/journal';
 
+  // ---- market analysis inside an artifact: no network, so examples + Claude reading a chart image ----
   await p.goto(site.url);
-  assert.match(await p.locator('.loading-title').first().innerText(), /กำลังเปิดสมุดเทรด/);
-  await p.waitForSelector('.summary');
+  await p.waitForSelector('#cv-mkt-price');
+  assert.equal(await p.evaluate(() => window.TFApp.state.view), 'market');
+  assert.match(await p.locator('#market-body .banner').innerText(), /ไม่ใช่ราคาตลาดจริง/);
+  assert.match(await p.locator('#market-body .hero-label').innerText(), /ราคาตัวอย่าง/);
+  assert.equal(await p.locator('#btn-mkt-refresh').isVisible(), false);
+  assert.equal(await p.locator('[data-action="plan-calc"]').count(), 0);
+  await p.waitForSelector('#ai-chart:not([hidden])');
+  await p.waitForFunction(() => document.querySelector('#view-market').firstElementChild.id === 'ai-chart');
+  assert.deepEqual(external, [], 'the artifact build must not call out to the network');
+  step('market view shows labelled example candles and makes no network calls');
+
+  // 1x1 PNG standing in for a chart screenshot
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  fs.writeFileSync(path.join(TMP, 'chart.png'), png);
+  await p.click('#btn-ai-chart');
+  await p.waitForFunction(() => /เลือกภาพกราฟก่อน/.test(document.querySelector('#toast').textContent));
+  assert.equal(await p.evaluate(() => window.__mock.samples.length), 0, 'nothing is sent without an image');
+  await p.setInputFiles('#ai-file', path.join(TMP, 'chart.png'));
+  await p.waitForSelector('#ai-preview:not([hidden])');
+  await p.fill('#ai-symbol', 'EURUSD');
+  await p.fill('#ai-tf', 'H1');
+  await p.fill('#ai-question', 'ควรรอ Buy ตรงไหน');
+  await p.click('#btn-ai-chart');
+  await p.waitForFunction(() => /1\.1620/.test(document.querySelector('#ai-chart-out').textContent));
+  let sent = await p.evaluate(() => window.__mock.samples[0]);
+  assert.equal(sent.images, 1);
+  assert.equal(sent.imageType, 'image/png');
+  assert.ok(sent.input.includes('ของ EURUSD กรอบเวลา H1') && sent.input.includes('ควรรอ Buy ตรงไหน') && sent.input.includes('ไม่ใช่คำแนะนำการลงทุน'));
+  assert.equal(await p.locator('#ai-chart-out b').first().innerText(), 'แนวโน้ม');
+  assert.match(await p.locator('#ai-chart-out').innerText(), /ข้อความอื่น <b>ไม่ใช่ HTML<\/b>/, 'the answer is shown as text, never as markup');
+  assert.equal(await p.locator('#ai-chart-out b').count(), 2);
+  assert.ok(await p.isEnabled('#btn-ai-chart'));
+  step('Claude reads an uploaded chart image; the answer streams in as plain text');
+
+  await p.evaluate(() => { window.__mock.sampleDelay = 4000; });
+  await p.fill('#ai-question', 'อีกครั้ง');
+  await p.click('#btn-ai-chart');
+  await p.waitForSelector('#btn-ai-chart-stop:not([hidden])');
+  await p.waitForFunction(() => /ขาขึ้น/.test(document.querySelector('#ai-chart-out').textContent));
+  await p.click('#btn-ai-chart-stop');
+  await p.waitForFunction(() => /หยุดแล้ว/.test(document.querySelector('#ai-chart-out').textContent));
+  assert.ok(await p.isEnabled('#btn-ai-chart'));
+  await p.evaluate(() => { window.__mock.sampleDelay = 80; window.__mock.sampleFail = 'rate_limited'; });
+  await p.fill('#ai-question', 'ครั้งที่สาม');
+  await p.click('#btn-ai-chart');
+  await p.waitForFunction(() => /โควตา/.test(document.querySelector('#ai-chart-out').textContent));
+  assert.ok(await p.locator('#ai-chart').isVisible());
+  step('stop button and a rate-limit error leave the feature usable');
+
+  // ---- journal in the cloud store ----
+  await p.click('.tabs a[data-view="overview"]');
+  await p.evaluate(() => sessionStorage.setItem('__mockWait', '600'));
+  await p.reload();
+  assert.match(await p.locator('#overview-body .loading-title').innerText(), /กำลังเปิดสมุดเทรด/);
+  await p.evaluate(() => sessionStorage.removeItem('__mockWait'));
+  await p.waitForSelector('#overview-body .summary');
+  assert.equal(await p.locator('#ai-coach').isVisible(), false, 'no AI review of example trades');
   assert.equal(await p.evaluate(() => window.TFApp.store.mode), 'cloud');
   assert.equal(await p.evaluate(() => localStorage.getItem('tf.trades.v1')), null);
   step('artifact build boots in cloud mode, shows examples while the journal is empty');
@@ -114,7 +188,7 @@ const MOCK = () => {
   assert.equal(m.d[BASE + '/chunks/c00001'].trades.length, 2);
   assert.equal(m.max, 1, 'never more than one write in flight');
   assert.equal(await p.evaluate(() => window.TFApp.store.trades.length), 2);
-  assert.match(await p.locator('.hero-value').innerText(), /\+\$75\.00/);
+  assert.match(await p.locator('#overview-body .hero-value').innerText(), /\+\$75\.00/);
   const stored = m.d[BASE + '/chunks/c00001'].trades[0];
   assert.ok(!('notes' in stored) && !('sample' in stored) && stored.symbol === 'XAUUSD', JSON.stringify(stored));
   step('rapid saves land in one private document; stale echoes do not drop trades');
@@ -132,9 +206,9 @@ const MOCK = () => {
   await p.waitForFunction(() => window.TFApp.state.ready);
   assert.equal(await p.evaluate(() => window.TFApp.state.view), 'tools', 'the open tab survives a reload through the hash');
   await p.click('.tabs a[data-view="overview"]');
-  await p.waitForSelector('.summary');
+  await p.waitForSelector('#overview-body .summary');
   assert.equal(await p.evaluate(() => window.TFApp.store.trades.length), 2);
-  assert.match(await p.locator('.hero-meta').innerText(), /จากทุน \$2,000/);
+  assert.match(await p.locator('#overview-body .hero-meta').innerText(), /จากทุน \$2,000/);
   step('reload restores trades and settings from the store');
 
   // a write that fails twice is retried and lands
@@ -165,6 +239,24 @@ const MOCK = () => {
   const bytes = Math.max(...Object.keys(m.d).map(k => JSON.stringify(m.d[k]).length));
   assert.ok(bytes < 100 * 1024, 'chunk size ' + bytes);
   step('bulk import of 230 trades = 3 writes, chunks of 100 (largest ' + (bytes / 1024).toFixed(1) + ' KB)');
+
+  // AI review of real statistics (text only, no notes)
+  await p.click('.tabs a[data-view="analysis"]');
+  await p.waitForSelector('#ai-coach:not([hidden])');
+  const before2 = await p.evaluate(() => window.__mock.samples.length);
+  await p.click('#btn-ai-coach');
+  await p.waitForFunction(() => /1\.1620/.test(document.querySelector('#ai-coach-out').textContent));
+  sent = await p.evaluate(n => window.__mock.samples[n], before2);
+  assert.equal(sent.images, 0);
+  const payload = JSON.parse(sent.input.slice(sent.input.indexOf('{'), sent.input.lastIndexOf('}') + 1));
+  assert.equal(payload.closedTrades, 233);
+  assert.ok(payload.bySymbol.some(g => g.name === 'GBPUSD' && g.trades === 230));
+  assert.ok(!/notes/.test(sent.input));
+  await p.evaluate(() => { window.__mock.sampleFail = 'not_granted'; });
+  await p.click('#seg-range button[data-range="ytd"]');
+  await p.click('#btn-ai-coach');
+  await p.waitForSelector('#ai-coach', { state: 'hidden' });
+  step('AI review sends statistics only; a declined permission hides the feature');
 
   // edit + delete inside chunks
   await p.click('.tabs a[data-view="journal"]');
