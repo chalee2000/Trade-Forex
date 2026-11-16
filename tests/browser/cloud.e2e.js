@@ -109,8 +109,9 @@ const MOCK = () => {
   await p.goto(site.url);
   await p.waitForSelector('#cv-mkt-price');
   assert.equal(await p.evaluate(() => window.TFApp.state.view), 'market');
-  assert.match(await p.locator('#market-body .banner').innerText(), /ไม่ใช่ราคาตลาดจริง/);
-  assert.match(await p.locator('#market-body .hero-label').innerText(), /ราคาตัวอย่าง/);
+  assert.match(await p.locator('#market-body .banner').innerText(), /ข้อมูลสมมติ/);
+  assert.match(await p.locator('#market-body .hero-label').innerText(), /ราคาอ้างอิง/);
+  assert.equal(await p.locator('#market-body .hero-value').innerText(), '1.10230', 'example ends at the reference quote');
   assert.equal(await p.locator('#btn-mkt-refresh').isVisible(), false);
   assert.equal(await p.locator('[data-action="plan-calc"]').count(), 0);
   await p.waitForSelector('#ai-chart:not([hidden])');

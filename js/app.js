@@ -636,15 +636,18 @@
     return daily ? C.fmtDate(new Date(t)) : C.fmtDate(new Date(t)) + ' ' + C.fmtTime(new Date(t));
   }
 
+  // the last example price is a published quote; everything before it is generated
+  var REF_NOTE = 'ราคาล่าสุดในกราฟตั้งตามราคาจริงช่วง ' + S.REFERENCE.label + ' แต่แท่งเทียนก่อนหน้าและอินดิเคเตอร์เป็นข้อมูลสมมติ ใช้ดูวิธีอ่านเท่านั้น';
+
   function mktNotice(d) {
     var sym = mktSymbol();
     var importBtn = '<button type="button" class="btn" data-action="mkt-import">นำเข้าไฟล์ราคา</button>';
     if (d.example && mkt.error) {
-      return '<div class="banner"><span class="tag">ตัวอย่าง</span><p>โหลดราคาสดของ ' + esc(sym.name) + ' ไม่ได้ อาจเป็นเพราะอินเทอร์เน็ตหรือแหล่งข้อมูลขัดข้องชั่วคราว กราฟด้านล่างเป็นราคาที่สร้างขึ้นเพื่อสาธิต ไม่ใช่ราคาตลาดจริง</p>' +
+      return '<div class="banner"><span class="tag">ตัวอย่าง</span><p>โหลดราคาสดของ ' + esc(sym.name) + ' ไม่ได้ อาจเป็นเพราะอินเทอร์เน็ตหรือแหล่งข้อมูลขัดข้องชั่วคราว ' + REF_NOTE + '</p>' +
         '<div class="btn-row"><button type="button" class="btn btn-primary" data-action="mkt-refresh">ลองโหลดอีกครั้ง</button>' + importBtn + '</div></div>';
     }
     if (d.example) {
-      return '<div class="banner"><span class="tag">ตัวอย่าง</span><p>กราฟด้านล่างเป็นราคาที่สร้างขึ้นเพื่อสาธิต ไม่ใช่ราคาตลาดจริง เพราะหน้าที่เปิดผ่าน Claude ดึงราคาสดไม่ได้ วิเคราะห์ของจริงได้สองทาง: ' +
+      return '<div class="banner"><span class="tag">ตัวอย่าง</span><p>หน้าที่เปิดผ่าน Claude ดึงราคาสดไม่ได้ ' + REF_NOTE + ' วิเคราะห์ของจริงได้สองทาง: ' +
         (ai.images ? 'ให้ AI อ่านภาพกราฟของคุณในกล่องด้านบน หรือ' : '') + 'นำเข้าไฟล์ราคาจาก MT4, MT5 หรือ TradingView</p>' +
         '<div class="btn-row">' + importBtn + '</div></div>';
     }
@@ -674,9 +677,11 @@
     var span = chg.hours >= 20 && chg.hours <= 80 ? '24 ชม.' : chg.hours < 20 ? chg.hours + ' ชม.' : Math.round(chg.hours / 24) + ' วัน';
     var e200 = C.isNum(a.ema200);
     return '<section class="card summary" aria-label="สรุปการวิเคราะห์">' +
-      '<div class="hero">' + ORN + '<span class="hero-label">' + esc(sym.name) + (d.tfLabel ? ' · ' + esc(d.tfLabel) : '') + (d.example ? ' · ราคาตัวอย่าง' : '') + '</span>' +
+      '<div class="hero">' + ORN + '<span class="hero-label">' + esc(sym.name) + (d.tfLabel ? ' · ' + esc(d.tfLabel) : '') + (d.example ? ' · ราคาอ้างอิง' : '') + '</span>' +
       '<span class="hero-value">' + px(a.close) + '</span>' +
-      '<div class="hero-meta"><span class="chg' + cls + '"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="' + (chg.abs < 0 ? 'M1 2h8L5 9z' : 'M1 8h8L5 1z') + '"/></svg>' + C.fmtSigned(chg.pct, 2, '%') + '</span><span>ในช่วง ' + span + ' ที่ผ่านมา</span></div></div>' +
+      // an example series has no real 24-hour change to report, only the date of its reference quote
+      (d.example ? '<div class="hero-meta"><span class="chg">ไม่ใช่ราคาสด</span><span>ราคาจริงช่วง ' + esc(S.REFERENCE.label) + '</span></div></div>' :
+        '<div class="hero-meta"><span class="chg' + cls + '"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="' + (chg.abs < 0 ? 'M1 2h8L5 9z' : 'M1 8h8L5 1z') + '"/></svg>' + C.fmtSigned(chg.pct, 2, '%') + '</span><span>ในช่วง ' + span + ' ที่ผ่านมา</span></div></div>') +
       '<div class="kpis">' +
       kpi('ภาพรวมอินดิเคเตอร์', esc(a.bias.label), 'คะแนน ' + C.fmtSigned(a.score, 0) + ' จาก ±100', biasMeter(a)) +
       kpi('แนวโน้ม', esc(a.trend.label), esc(a.trend.note)) +

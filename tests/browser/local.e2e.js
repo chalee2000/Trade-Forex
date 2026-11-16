@@ -85,8 +85,9 @@ const { serve } = require('./serve');
   // a provider failure falls back to clearly-labelled example candles
   await p.selectOption('#m-symbol', 'USDCAD');
   await p.waitForSelector('#market-body .banner .tag');
-  assert.match(await txt('#market-body .banner'), /โหลดราคาสดของ USD\/CAD ไม่ได้[\s\S]*ไม่ใช่ราคาตลาดจริง/);
-  assert.match(await txt('.hero-label'), /ราคาตัวอย่าง/);
+  assert.match(await txt('#market-body .banner'), /โหลดราคาสดของ USD\/CAD ไม่ได้[\s\S]*ข้อมูลสมมติ/);
+  assert.match(await txt('.hero-label'), /ราคาอ้างอิง/);
+  assert.match(await txt('#market-body .hero-meta'), /ไม่ใช่ราคาสด/);
   assert.equal(await p.locator('[data-action="plan-calc"]').count(), 0, 'example prices cannot be sent on as a plan');
   step('failed price load is reported and falls back to labelled examples');
 
@@ -111,7 +112,7 @@ const { serve } = require('./serve');
   await p.click('.tabs a[data-view="overview"]');
   await p.waitForSelector('#overview-body .summary');
   assert.ok(await p.locator('.banner .tag').first().isVisible());
-  assert.match(await txt('#overview-body .hero-value'), /\+\$1,075\.52/);
+  assert.match(await txt('#overview-body .hero-value'), /\+\$1,140\.16/);
   step('demo shown on first load');
 
   // empty submit -> validation

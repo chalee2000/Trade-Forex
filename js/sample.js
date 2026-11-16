@@ -19,13 +19,13 @@
     };
   }
 
-  /* Price levels are illustrative, not quotes. */
+  /* Price levels sit around the November 2026 reference quotes below; the trades themselves are made up. */
   var SPECS = [
-    { symbol: 'XAUUSD', asset: 'gold', base: 4120, drift: 110, slMin: 7, slMax: 18, w: 30, edge: 0.07 },
-    { symbol: 'EURUSD', asset: 'forex', base: 1.165, drift: 0.012, slMin: 0.0012, slMax: 0.0028, w: 22, edge: 0.02 },
-    { symbol: 'BTCUSD', asset: 'crypto', base: 104500, drift: 6500, slMin: 650, slMax: 1600, w: 22, edge: -0.08 },
-    { symbol: 'GBPUSD', asset: 'forex', base: 1.332, drift: 0.015, slMin: 0.0015, slMax: 0.0035, w: 13, edge: 0 },
-    { symbol: 'USDJPY', asset: 'forex', base: 153.4, drift: 2.2, slMin: 0.18, slMax: 0.42, w: 13, edge: -0.02 }
+    { symbol: 'XAUUSD', asset: 'gold', base: 3865, drift: 120, slMin: 8, slMax: 20, w: 30, edge: 0.07 },
+    { symbol: 'EURUSD', asset: 'forex', base: 1.1023, drift: 0.011, slMin: 0.0012, slMax: 0.0028, w: 22, edge: 0.02 },
+    { symbol: 'BTCUSD', asset: 'crypto', base: 64828, drift: 4500, slMin: 450, slMax: 1100, w: 22, edge: -0.08 },
+    { symbol: 'GBPUSD', asset: 'forex', base: 1.3214, drift: 0.015, slMin: 0.0015, slMax: 0.0035, w: 13, edge: 0 },
+    { symbol: 'USDJPY', asset: 'forex', base: 159.69, drift: 2.2, slMin: 0.18, slMax: 0.42, w: 13, edge: -0.02 }
   ];
 
   var STRATEGIES = [
@@ -138,12 +138,22 @@
     return out;
   }
 
-  /* Illustrative price levels and typical daily move (%), per symbol. */
-  var PRICE_SPECS = {
-    EURUSD: { base: 1.165, vol: 0.5 }, GBPUSD: { base: 1.332, vol: 0.55 }, USDJPY: { base: 153.4, vol: 0.6 },
-    AUDUSD: { base: 0.655, vol: 0.6 }, USDCHF: { base: 0.802, vol: 0.5 }, USDCAD: { base: 1.392, vol: 0.4 },
-    NZDUSD: { base: 0.592, vol: 0.6 }, XAUUSD: { base: 4120, vol: 1.1 }, BTCUSD: { base: 104500, vol: 2.4 }
+  /*
+   * Reference levels: published quotes from 13–16 November 2026 (forex from Bloomberg's currency
+   * page dated 13 Nov and matching FX sites; spot gold from TradingView, 16 Nov; bitcoin from OKX,
+   * 16 Nov). They are a snapshot, not a feed: they anchor the example candles so the example sits
+   * where the market actually is, and they go stale. `vol` is a typical daily move in percent.
+   */
+  var REFERENCE = {
+    asOf: '2026-11-16',
+    label: '13–16 พ.ย. 2026',
+    prices: {
+      EURUSD: { base: 1.1023, vol: 0.5 }, GBPUSD: { base: 1.3214, vol: 0.55 }, USDJPY: { base: 159.69, vol: 0.6 },
+      AUDUSD: { base: 0.6771, vol: 0.65 }, USDCHF: { base: 0.8387, vol: 0.5 }, USDCAD: { base: 1.427, vol: 0.4 },
+      XAUUSD: { base: 3865, vol: 1.4 }, BTCUSD: { base: 64828, vol: 3.2 }
+    }
   };
+  var PRICE_SPECS = REFERENCE.prices;
 
   function hash(str) {
     var h = 2166136261;
@@ -183,5 +193,5 @@
     return out;
   }
 
-  return { sampleTrades: sampleTrades, sampleCandles: sampleCandles, START_BALANCE: 5000 };
+  return { sampleTrades: sampleTrades, sampleCandles: sampleCandles, REFERENCE: REFERENCE, START_BALANCE: 5000 };
 });
