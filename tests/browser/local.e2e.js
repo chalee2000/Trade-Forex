@@ -188,7 +188,8 @@ const { serve } = require('./serve');
   assert.equal(await p.inputValue('#f-pnl'), '199.00');
   await p.click('#btn-save-trade');
   await p.waitForSelector('#dlg-trade:not([open])', { state: 'attached' });
-  assert.match(await txt('.journal-table tbody'), /\+\$199\.00/);
+  // the list re-renders on the next animation frame, so wait for it rather than reading at once
+  await p.waitForFunction(() => /\+\$199\.00/.test(document.querySelector('.journal-table tbody').textContent));
   await p.fill('#q', '');
   step('journal search, edit and HTML escaping');
 

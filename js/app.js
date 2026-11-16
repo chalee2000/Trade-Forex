@@ -17,6 +17,33 @@
   var RANGE_TEXT = { all: 'ทุกช่วงเวลา', '7d': '7 วันล่าสุด', '30d': '30 วันล่าสุด', '90d': '90 วันล่าสุด', ytd: 'ตั้งแต่ต้นปี' };
   var R_SHORT = ['< −2R', '−2…−1R', '−1…0', '0…1R', '1…2R', '2…3R', '≥ 3R'];
   var PAGE = 100;
+  var PAGE_HEAD = {
+    market: ['วิเคราะห์ตลาด', 'อ่านกราฟด้วยอินดิเคเตอร์ แนวรับ-แนวต้าน และ AI'],
+    overview: ['ภาพรวมพอร์ต', 'ผลรวมและเส้นเงินทุนจากเทรดที่บันทึกไว้'],
+    journal: ['บันทึกเทรด', 'ทุกออเดอร์ที่จดไว้ แตะแถวเพื่อดูหรือแก้ไข'],
+    analysis: ['สถิติการเทรด', 'ดูว่าอะไรทำเงิน และอะไรทำให้เสียเงิน'],
+    tools: ['เครื่องมือ', 'คำนวณขนาด Lot ตั้งค่าพอร์ต และจัดการข้อมูล']
+  };
+
+  /* A banknote-style guilloche rosette, drawn once as an SVG symbol and reused on every hero plate. */
+  function ornamentSymbol() {
+    function ring(count, lobes, radius, amp, steps) {
+      var out = '';
+      for (var i = 0; i < count; i++) {
+        var ph = (2 * Math.PI * i) / count, d = '';
+        for (var k = 0; k <= steps; k++) {
+          var th = (2 * Math.PI * k) / steps, r = radius + amp * Math.sin(lobes * th + ph);
+          d += (k ? 'L' : 'M') + (150 + r * Math.cos(th)).toFixed(1) + ' ' + (150 + r * Math.sin(th)).toFixed(1);
+        }
+        out += '<path d="' + d + 'Z"/>';
+      }
+      return out;
+    }
+    return '<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="tf-orn" viewBox="0 0 300 300">' +
+      '<g fill="none" stroke="currentColor" stroke-width="0.55">' + ring(12, 9, 108, 34, 216) + ring(8, 14, 54, 15, 168) +
+      '<circle cx="150" cy="150" r="146"/><circle cx="150" cy="150" r="30"/></g></symbol></svg>';
+  }
+  var ORN = '<svg class="orn" aria-hidden="true"><use href="#tf-orn"/></svg>';
 
   var state = {
     view: 'market', range: 'all', asset: 'all', q: '', limit: PAGE, calMonth: null,
@@ -55,7 +82,7 @@
 
   function assetChip(asset) {
     var a = C.ASSETS[asset] || C.ASSETS.forex;
-    return '<span class="mono-chip" title="' + esc(a.label) + '">' + a.short + '</span>';
+    return '<span class="mono-chip ' + a.key + '" title="' + esc(a.label) + '">' + a.short + '</span>';
   }
 
   function sideHtml(side) {
@@ -281,7 +308,7 @@
     }
     var wr = st.winRate || 0;
     return '<section class="card summary" aria-label="สรุปผล">' +
-      '<div class="hero"><span class="hero-label">กำไร/ขาดทุนสุทธิ · ' + RANGE_TEXT[state.range] + '</span>' +
+      '<div class="hero">' + ORN + '<span class="hero-label">กำไร/ขาดทุนสุทธิ · ' + RANGE_TEXT[state.range] + '</span>' +
       '<span class="hero-value' + cls + '">' + C.fmtMoney(st.net, { sign: true }) + '</span>' +
       '<div class="hero-meta">' + ret + '<span>' + counts + '</span></div></div>' +
       '<div class="kpis">' +
@@ -630,11 +657,11 @@
       (d.source.proxy ? ' · ใช้ราคาโทเคนทอง ' + esc(d.source.proxy) + ' แทน XAU/USD ซึ่งใกล้เคียงกันแต่ไม่เท่ากันทุกจุด' : '') + ' · อาจต่างจากราคาโบรกเกอร์ของคุณเล็กน้อย</span></div>';
   }
 
+  /** Five bands (strong down, down, flat, up, strong up) with a pin at the score. */
   function biasMeter(a) {
-    var pos = (a.score + 100) / 2, w = Math.abs(a.score) / 2;
-    return '<div class="bias" role="img" aria-label="คะแนนรวม ' + C.fmtSigned(a.score, 0) + ' จากช่วง −100 ถึง +100">' +
-      '<i class="' + (a.score < 0 ? 'neg' : 'pos') + '" style="left:' + (a.score < 0 ? pos : 50).toFixed(1) + '%;width:' + w.toFixed(1) + '%"></i>' +
-      '<b style="left:' + pos.toFixed(1) + '%"></b></div>';
+    var pos = Math.max(1, Math.min(99, (a.score + 100) / 2));
+    return '<div class="gauge" role="img" aria-label="คะแนนรวม ' + C.fmtSigned(a.score, 0) + ' จากช่วง −100 ถึง +100 อยู่ในช่วง' + esc(a.bias.label) + '">' +
+      '<div class="gauge-track"><i></i><i></i><i></i><i></i><i></i></div><b class="gauge-pin" style="left:' + pos.toFixed(1) + '%"></b></div>';
   }
 
   function mktSummary(a, d) {
@@ -647,9 +674,9 @@
     var span = chg.hours >= 20 && chg.hours <= 80 ? '24 ชม.' : chg.hours < 20 ? chg.hours + ' ชม.' : Math.round(chg.hours / 24) + ' วัน';
     var e200 = C.isNum(a.ema200);
     return '<section class="card summary" aria-label="สรุปการวิเคราะห์">' +
-      '<div class="hero"><span class="hero-label">' + esc(sym.name) + (d.tfLabel ? ' · ' + esc(d.tfLabel) : '') + (d.example ? ' · ราคาตัวอย่าง' : '') + '</span>' +
+      '<div class="hero">' + ORN + '<span class="hero-label">' + esc(sym.name) + (d.tfLabel ? ' · ' + esc(d.tfLabel) : '') + (d.example ? ' · ราคาตัวอย่าง' : '') + '</span>' +
       '<span class="hero-value">' + px(a.close) + '</span>' +
-      '<div class="hero-meta"><span class="pnl' + cls + '">' + C.fmtSigned(chg.pct, 2, '%') + '</span><span>ในช่วง ' + span + ' ที่ผ่านมา</span></div></div>' +
+      '<div class="hero-meta"><span class="chg' + cls + '"><svg viewBox="0 0 10 10" aria-hidden="true"><path d="' + (chg.abs < 0 ? 'M1 2h8L5 9z' : 'M1 8h8L5 1z') + '"/></svg>' + C.fmtSigned(chg.pct, 2, '%') + '</span><span>ในช่วง ' + span + ' ที่ผ่านมา</span></div></div>' +
       '<div class="kpis">' +
       kpi('ภาพรวมอินดิเคเตอร์', esc(a.bias.label), 'คะแนน ' + C.fmtSigned(a.score, 0) + ' จาก ±100', biasMeter(a)) +
       kpi('แนวโน้ม', esc(a.trend.label), esc(a.trend.note)) +
@@ -1023,6 +1050,8 @@
       if (a.dataset.view === state.view) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
     });
     $('#filters').hidden = state.view === 'tools' || state.view === 'market';
+    $('#page-title').textContent = PAGE_HEAD[state.view][0];
+    $('#page-sub').textContent = PAGE_HEAD[state.view][1];
     renderSeg();
     renderBanner();
     destroyCharts();
@@ -1509,6 +1538,7 @@
 
   function initStatic() {
     document.documentElement.lang = 'th';
+    document.body.insertAdjacentHTML('beforeend', ornamentSymbol());
     $('#m-symbol').innerHTML = C.ASSET_ORDER.map(function (k) {
       return '<optgroup label="' + esc(C.ASSETS[k].label) + '">' + Market.SYMBOLS.filter(function (s) { return s.asset === k; }).map(function (s) {
         return '<option value="' + s.key + '">' + esc(s.name) + '</option>';

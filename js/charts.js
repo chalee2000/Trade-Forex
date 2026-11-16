@@ -171,7 +171,17 @@
         datasets: [{
           data: cfg.values,
           borderColor: color, borderWidth: 2, borderJoinStyle: 'round', borderCapStyle: 'round', tension: 0,
-          fill: cfg.fill || 'start', backgroundColor: alpha(color, 0.1),
+          fill: cfg.fill || 'start',
+          // a wash that fades away from the line, never a solid block
+          backgroundColor: function (c) {
+            var area = c.chart.chartArea;
+            if (!area) return alpha(color, 0.1);
+            var g = c.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+            var down = cfg.fill === 'origin';
+            g.addColorStop(0, alpha(color, down ? 0.03 : 0.2));
+            g.addColorStop(1, alpha(color, down ? 0.2 : 0.01));
+            return g;
+          },
           pointRadius: function (c) { return cfg.endDot !== false && c.dataIndex === last ? 4 : 0; },
           pointHoverRadius: 4, pointBackgroundColor: color,
           pointBorderColor: th.surface, pointBorderWidth: 2, pointHoverBorderColor: th.surface, pointHoverBorderWidth: 2,
