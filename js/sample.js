@@ -140,8 +140,8 @@
 
   /*
    * Reference levels: published quotes from 13–16 November 2026 (forex from Bloomberg's currency
-   * page dated 13 Nov and matching FX sites; spot gold from TradingView, 16 Nov; bitcoin from OKX,
-   * 16 Nov). They are a snapshot, not a feed: they anchor the example candles so the example sits
+   * page dated 13 Nov and matching FX sites; gold from a broker's XAUUSD quote at 17:45 Bangkok time
+   * on 16 Nov; bitcoin from OKX, 16 Nov). They are a snapshot, not a feed: they anchor the example candles so the example sits
    * where the market actually is, and they go stale. `vol` is a typical daily move in percent.
    */
   var REFERENCE = {
@@ -150,7 +150,7 @@
     prices: {
       EURUSD: { base: 1.1023, vol: 0.5 }, GBPUSD: { base: 1.3214, vol: 0.55 }, USDJPY: { base: 159.69, vol: 0.6 },
       AUDUSD: { base: 0.6771, vol: 0.65 }, USDCHF: { base: 0.8387, vol: 0.5 }, USDCAD: { base: 1.427, vol: 0.4 },
-      XAUUSD: { base: 3865, vol: 1.4 }, BTCUSD: { base: 64828, vol: 3.2 }
+      XAUUSD: { base: 3868.41, vol: 1.4 }, BTCUSD: { base: 64828, vol: 3.2 }
     }
   };
   var PRICE_SPECS = REFERENCE.prices;

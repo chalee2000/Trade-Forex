@@ -291,3 +291,49 @@ test('setups: a stretched trend waits for a pullback instead of chasing', () => 
   assert.ok(a.setups.buy.entry < a.close);
   checkSetup(a.setups.buy, a);
 });
+
+test('chart reading: a sensible answer passes through with risk:reward worked out', () => {
+  const r = T.normalizeChartReading({
+    isChart: true, symbol: 'xauusd.iux', timeframe: 'm15', lastPrice: 3868.41, trend: 'ขาลง', summary: 'ราคาเด้งจาก 3,828',
+    supports: [3856.3, 3828.1, 3828.1, 99999], resistances: [3912.7, '3,884.50'],
+    buy: { entry: 3857, sl: 3826, tp1: 3884, tp2: 3912, condition: 'รอยืนเหนือ 3,856' },
+    sell: { entry: 3884, sl: 3900, tp1: 3856, tp2: 3830, condition: 'รอโดนขายที่ 3,884' },
+    favored: 'sell', reason: 'โครงสร้างยังลง', risks: 'ข่าว', confidence: 'กลาง'
+  });
+  assert.equal(r.isChart, true);
+  assert.equal(r.symbol, 'XAUUSD.IUX');
+  assert.equal(r.timeframe, 'M15');
+  assert.equal(r.lastPrice, 3868.41);
+  assert.deepEqual(r.supports, [3856.3, 3828.1], 'deduplicated, nearest first, misread dropped');
+  assert.deepEqual(r.resistances, [3884.5, 3912.7]);
+  near(r.plans.buy.rr1, 27 / 31);
+  near(r.plans.buy.rr2, 55 / 31);
+  near(r.plans.sell.rr1, 28 / 16);
+  assert.equal(r.favored, 'sell');
+  assert.equal(r.confidence, 'กลาง');
+  assert.deepEqual(r.dropped, []);
+});
+
+test('chart reading: plans with the stop or targets on the wrong side are dropped', () => {
+  const r = T.normalizeChartReading({
+    lastPrice: 1.1023,
+    buy: { entry: 1.1, sl: 1.105, tp1: 1.11 },          // stop above a buy entry
+    sell: { entry: 1.105, sl: 1.11, tp1: 1.1, tp2: 1.12 }, // tp2 on the wrong side: kept without it
+    favored: 'buy'
+  });
+  assert.equal(r.plans.buy, null);
+  assert.deepEqual(r.dropped, ['buy']);
+  assert.equal(r.plans.sell.tp2, null);
+  assert.equal(r.favored, null, 'a favoured side without a usable plan is not shown as favoured');
+});
+
+test('chart reading: not a chart, junk and missing fields', () => {
+  assert.equal(T.normalizeChartReading({ isChart: false }).isChart, false);
+  const junk = T.normalizeChartReading('not json');
+  assert.equal(junk.lastPrice, null);
+  assert.deepEqual(junk.plans, { buy: null, sell: null });
+  const noPrice = T.normalizeChartReading({ buy: { entry: 100, sl: 90, tp1: 120 }, confidence: 'มาก', favored: 'wait' });
+  assert.equal(noPrice.plans.buy.entry, 100);
+  assert.equal(noPrice.confidence, '');
+  assert.equal(noPrice.favored, 'wait');
+});

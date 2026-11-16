@@ -539,10 +539,69 @@
     return 'W' + Math.round(minutes / 10080);
   }
 
+  /* ------------------------------------------------------------------ *
+   * Reading a chart screenshot (the JSON Claude returns for an uploaded image)
+   * ------------------------------------------------------------------ */
+
+  function txt(v, max) {
+    return typeof v === 'string' ? v.replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, max || 400) : '';
+  }
+
+  function price(v) {
+    var n = typeof v === 'string' ? C.num(v) : v;
+    return isNum(n) && n > 0 ? n : null;
+  }
+
+  /**
+   * Check and tidy the model's reading of a chart image. Nothing it says is trusted as-is:
+   * prices must be positive numbers near the last price, and a plan is kept only when its
+   * stop and targets sit on the right sides of its entry. Returns
+   * { isChart, symbol, timeframe, lastPrice, trend, summary, supports, resistances,
+   *   plans: { buy, sell } (each null when unusable), favored, reason, risks, confidence, dropped }
+   */
+  function normalizeChartReading(raw) {
+    raw = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+    var out = {
+      isChart: raw.isChart !== false,
+      symbol: txt(raw.symbol, 20).toUpperCase().replace(/[^A-Z0-9.]/g, ''),
+      timeframe: txt(raw.timeframe, 8).toUpperCase().replace(/[^A-Z0-9]/g, ''),
+      lastPrice: price(raw.lastPrice),
+      trend: txt(raw.trend, 40), summary: txt(raw.summary, 600), reason: txt(raw.reason, 400), risks: txt(raw.risks, 400),
+      confidence: /^(สูง|กลาง|ต่ำ)$/.test(txt(raw.confidence, 8)) ? txt(raw.confidence, 8) : '',
+      supports: [], resistances: [], plans: { buy: null, sell: null }, favored: null, dropped: []
+    };
+    var ref = out.lastPrice;
+    // anything more than 25% away from the last price is a misread, not a level
+    function near(p) { return p !== null && (ref === null || Math.abs(p - ref) / ref <= 0.25); }
+    function list(v) {
+      return (Array.isArray(v) ? v : []).map(price).filter(near).filter(function (p, k, arr) { return arr.indexOf(p) === k; }).slice(0, 4);
+    }
+    out.supports = list(raw.supports).sort(function (a, b) { return b - a; });
+    out.resistances = list(raw.resistances).sort(function (a, b) { return a - b; });
+    ['buy', 'sell'].forEach(function (side) {
+      var p = raw[side] && typeof raw[side] === 'object' ? raw[side] : null;
+      if (!p) return;
+      var d = side === 'buy' ? 1 : -1;
+      var entry = price(p.entry), sl = price(p.sl), tp1 = price(p.tp1), tp2 = price(p.tp2);
+      if (!near(entry) || !near(sl) || !near(tp1)) { out.dropped.push(side); return; }
+      if (!(d * (entry - sl) > 0 && d * (tp1 - entry) > 0)) { out.dropped.push(side); return; }
+      if (tp2 !== null && !(near(tp2) && d * (tp2 - tp1) > 0)) tp2 = null;
+      var risk = d * (entry - sl);
+      out.plans[side] = {
+        side: side, entry: entry, sl: sl, tp1: tp1, tp2: tp2,
+        rr1: (d * (tp1 - entry)) / risk, rr2: tp2 === null ? null : (d * (tp2 - entry)) / risk,
+        condition: txt(p.condition, 300)
+      };
+    });
+    var fav = txt(raw.favored, 8).toLowerCase();
+    out.favored = (fav === 'buy' || fav === 'sell') && out.plans[fav] ? fav : fav === 'wait' ? 'wait' : null;
+    return out;
+  }
+
   return {
     MIN_CANDLES: MIN_CANDLES, BIAS: BIAS,
     sma: sma, ema: ema, rsi: rsi, macd: macd, atr: atr, bollinger: bollinger, adx: adx,
     swings: swings, levels: levels, biasOf: biasOf, analyze: analyze,
-    parseCandles: parseCandles, spacingMinutes: spacingMinutes, timeframeLabel: timeframeLabel, lastOf: lastOf
+    parseCandles: parseCandles, normalizeChartReading: normalizeChartReading, spacingMinutes: spacingMinutes, timeframeLabel: timeframeLabel, lastOf: lastOf
   };
 });

@@ -74,6 +74,22 @@ const MOCK = () => {
     setTimeout(() => opts.onText && !opts.signal.aborted && opts.onText({ text: ANSWER.slice(0, 30), delta: ANSWER.slice(0, 30) }), 20);
     setTimeout(() => { if (opts.signal && opts.signal.aborted) return; if (opts.onText) opts.onText({ text: ANSWER, delta: ANSWER.slice(30) }); res({ text: ANSWER, truncated: false, modelTierApplied: 'default' }); }, M.sampleDelay || 80);
   });
+  // sample.json: a structured reading of a gold chart; M.jsonAnswer can replace it per call
+  M.jsonAnswer = null;
+  sample.json = (input, opts) => new Promise((res, rej) => {
+    opts = opts || {};
+    M.samples.push({ input: String(input), images: opts.images ? opts.images.length : 0, imageType: opts.images && opts.images[0] ? opts.images[0].type : null, json: true });
+    if (M.sampleFail) { const code = M.sampleFail; M.sampleFail = null; return setTimeout(() => rej({ code, message: 'mock ' + code }), 20); }
+    if (opts.signal) opts.signal.addEventListener('abort', () => rej({ code: 'cancelled', message: 'aborted' }));
+    const answer = M.jsonAnswer || {
+      isChart: true, symbol: 'XAUUSD.iux', timeframe: 'M15', lastPrice: 3868.41, trend: 'ขาลง', summary: 'ราคาลงแรงแล้วเด้งจาก 3,828 <b>x</b>',
+      supports: [3856.3, 3828.1], resistances: [3884.5, 3912.7],
+      buy: { entry: 3857, sl: 3826, tp1: 3884, tp2: 3912, condition: 'รอยืนเหนือ 3,856' },
+      sell: { entry: 3884, sl: 3900, tp1: 3856, tp2: 3830, condition: 'รอโดนขายที่ 3,884' },
+      favored: 'sell', reason: 'โครงสร้างยังทำจุดต่ำใหม่', risks: 'ข่าวเศรษฐกิจคืนนี้', confidence: 'กลาง'
+    };
+    setTimeout(() => { if (opts.signal && opts.signal.aborted) return; res(JSON.parse(JSON.stringify(answer))); }, M.sampleDelay || 80);
+  });
   sample.limits = async () => ({ maxPromptBytes: 262144, images: { maxCount: 4, maxInputBytes: 20 * 1024 * 1024, mediaTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] } });
   const caps = {
     sample,
@@ -128,31 +144,55 @@ const MOCK = () => {
   assert.equal(await p.evaluate(() => window.__mock.samples.length), 0, 'nothing is sent without an image');
   await p.setInputFiles('#ai-file', path.join(TMP, 'chart.png'));
   await p.waitForSelector('#ai-preview:not([hidden])');
-  await p.fill('#ai-symbol', 'EURUSD');
-  await p.fill('#ai-tf', 'H1');
-  await p.fill('#ai-question', 'ควรรอ Buy ตรงไหน');
+  await p.fill('#ai-question', 'เน้นแผน Sell');
   await p.click('#btn-ai-chart');
-  await p.waitForFunction(() => /1\.1620/.test(document.querySelector('#ai-chart-out').textContent));
+  await p.waitForSelector('#ai-chart-out.has-reading');
   let sent = await p.evaluate(() => window.__mock.samples[0]);
+  assert.equal(sent.json, true);
   assert.equal(sent.images, 1);
   assert.equal(sent.imageType, 'image/png');
-  assert.ok(sent.input.includes('ของ EURUSD กรอบเวลา H1') && sent.input.includes('ควรรอ Buy ตรงไหน') && sent.input.includes('ไม่ใช่คำแนะนำการลงทุน'));
-  assert.equal(await p.locator('#ai-chart-out b').first().innerText(), 'แนวโน้ม');
-  assert.match(await p.locator('#ai-chart-out').innerText(), /ข้อความอื่น <b>ไม่ใช่ HTML<\/b>/, 'the answer is shown as text, never as markup');
-  assert.equal(await p.locator('#ai-chart-out b').count(), 2);
-  assert.ok(await p.isEnabled('#btn-ai-chart'));
-  step('Claude reads an uploaded chart image; the answer streams in as plain text');
+  assert.ok(sent.input.includes('lastPrice') && sent.input.includes('เน้นแผน Sell'));
+  const out = await p.locator('#ai-chart-out').innerText();
+  assert.match(out, /XAUUSD\.IUX · M15 · ราคาปัจจุบันในภาพ/);
+  assert.equal(await p.locator('.ai-price-value').innerText(), '3,868.41', 'the price read from the screenshot is the headline');
+  assert.match(out, /ความมั่นใจกลาง/);
+  assert.match(out, /แนวต้าน 3,884.50/);
+  assert.match(out, /ราคาลงแรงแล้วเด้งจาก 3,828 <b>x<\/b>/, 'text from the model is shown as text, never as markup');
+  assert.equal(await p.locator('#ai-chart-out .ai-plan').count(), 2);
+  assert.equal(await p.locator('#ai-chart-out .ai-plan.favored h4').innerText(), 'จุดเข้าขาย (Sell) ★');
+  // sell ladder, highest price first: SL 3900, entry 3884, current 3868.41, TP1 3856, TP2 3830
+  const sellRows = await p.$$eval('.ai-plan.favored .lad', els => els.map(e => e.className.replace('lad ', '') + ':' + e.querySelector('.lad-price').textContent));
+  assert.deepEqual(sellRows, ['sl:3,900.00', 'entry:3,884.00', 'now:3,868.41', 'tp:3,856.00', 'tp:3,830.00']);
+  assert.match(await p.locator('.ai-plan.favored').innerText(), /1\.75R/);
+  await p.waitForFunction(() => window.TFApp.state.ready);
+  await p.click('.ai-plan.favored [data-action="ai-plan-trade"]');
+  await p.waitForSelector('#dlg-trade[open]');
+  assert.equal(await p.inputValue('#f-symbol'), 'XAUUSD');
+  assert.ok(await p.isChecked('#f-asset-gold') && await p.isChecked('#f-side-sell'));
+  assert.equal(await p.inputValue('#f-entry'), '3884');
+  assert.equal(await p.inputValue('#f-sl'), '3900');
+  assert.equal(await p.inputValue('#f-tp'), '3830');
+  await p.click('#dlg-trade [data-action="close-dialog"]');
+  step('Claude reads the screenshot: price from the image, buy and sell ladders, plan into the trade form');
+
+  // a plan with the stop on the wrong side is not shown
+  await p.evaluate(() => { window.__mock.jsonAnswer = { isChart: true, symbol: 'EURUSD', lastPrice: 1.1023, buy: { entry: 1.1, sl: 1.105, tp1: 1.11 }, sell: { entry: 1.104, sl: 1.106, tp1: 1.1, tp2: 1.098 }, favored: 'buy' }; });
+  await p.click('#btn-ai-chart');
+  await p.waitForFunction(() => /ไม่สมเหตุสมผล/.test(document.querySelector('#ai-chart-out').textContent));
+  assert.equal(await p.locator('#ai-chart-out .ai-plan.favored').count(), 0);
+  await p.evaluate(() => { window.__mock.jsonAnswer = { isChart: false }; });
+  await p.click('#btn-ai-chart');
+  await p.waitForFunction(() => /ไม่ใช่กราฟราคา/.test(document.querySelector('#ai-chart-out').textContent));
+  await p.evaluate(() => { window.__mock.jsonAnswer = null; });
+  step('nonsense plans and non-chart images are caught');
 
   await p.evaluate(() => { window.__mock.sampleDelay = 4000; });
-  await p.fill('#ai-question', 'อีกครั้ง');
   await p.click('#btn-ai-chart');
   await p.waitForSelector('#btn-ai-chart-stop:not([hidden])');
-  await p.waitForFunction(() => /ขาขึ้น/.test(document.querySelector('#ai-chart-out').textContent));
   await p.click('#btn-ai-chart-stop');
   await p.waitForFunction(() => /หยุดแล้ว/.test(document.querySelector('#ai-chart-out').textContent));
   assert.ok(await p.isEnabled('#btn-ai-chart'));
   await p.evaluate(() => { window.__mock.sampleDelay = 80; window.__mock.sampleFail = 'rate_limited'; });
-  await p.fill('#ai-question', 'ครั้งที่สาม');
   await p.click('#btn-ai-chart');
   await p.waitForFunction(() => /โควตา/.test(document.querySelector('#ai-chart-out').textContent));
   assert.ok(await p.locator('#ai-chart').isVisible());

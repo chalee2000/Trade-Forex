@@ -103,6 +103,29 @@ const { serve } = require('./serve');
   await p.waitForSelector('button[data-setup-side="buy"][aria-pressed="true"]');
   step('entry/exit ladder switches between buy and sell and feeds the chosen side on');
 
+  // calibrate gold to a broker price: the whole series shifts so the last price matches
+  await p.selectOption('#m-symbol', 'XAUUSD');
+  await p.waitForFunction(() => /PAXG/.test((document.querySelector('.source-line') || {}).textContent || ''));
+  const rawLast = await p.evaluate(() => window.TFApp.market.data.candles.slice(-1)[0].c);
+  await p.click('[data-action="calib-open"]');
+  await p.waitForSelector('#form-calib');
+  await p.fill('#calib-price', String(rawLast * 1.05));
+  await p.click('#form-calib button[type="submit"]');
+  await p.waitForFunction(() => /2%/.test(document.querySelector('#toast').textContent));
+  const broker = Math.round((rawLast + 3.41) * 100) / 100;
+  await p.fill('#calib-price', String(broker));
+  await p.click('#form-calib button[type="submit"]');
+  await p.waitForFunction(() => /ให้ตรงราคาโบรกเกอร์/.test((document.querySelector('.source-line') || {}).textContent || ''));
+  assert.equal(await txt('#market-body .hero-value'), broker.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  assert.match(await txt('.source-line'), /ปรับ \+3\.4\d ให้ตรงราคาโบรกเกอร์/);
+  await p.reload();
+  await p.waitForSelector('#cv-mkt-price');
+  assert.equal(await p.inputValue('#m-symbol'), 'XAUUSD');
+  assert.equal(await txt('#market-body .hero-value'), broker.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), 'calibration survives a reload');
+  await p.click('[data-action="calib-clear"]');
+  await p.waitForFunction(() => /PAXG/.test((document.querySelector('.source-line') || {}).textContent || ''));
+  step('live prices can be calibrated to the broker and the setting is kept');
+
   // a provider failure falls back to clearly-labelled example candles
   await p.selectOption('#m-symbol', 'USDCAD');
   await p.waitForSelector('#market-body .banner .tag');
